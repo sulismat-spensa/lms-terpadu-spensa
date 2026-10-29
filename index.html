@@ -371,8 +371,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     /* ---------------- KONEKSI API (MODE TERPUSAT) ---------------- */
     var API_CFG_KEY = "lmsterpadu_api_cfg";
-    var DEFAULT_API_URL = ""; /* LMS Terpadu: spreadsheet BARU — URL /exec ditempel admin lewat Pengaturan Koneksi */
-    var CFG = {url: DEFAULT_API_URL, terpusat: false};
+    var DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbybBftwGRX-VSIveUWm0jl9xpsOiGH7qdN-OeIPks8TE4Wu5bvekgFeh58qds9FDf4R/exec"; /* LMS Terpadu: spreadsheet BARU — URL /exec bawaan aplikasi; tetap dapat diubah admin lewat Pengaturan Koneksi */
+    var CFG = {url: DEFAULT_API_URL, terpusat: true};
     try {
       var _cfgSaved = JSON.parse(localStorage.getItem(API_CFG_KEY));
       if(_cfgSaved && _cfgSaved.url) CFG = {url: String(_cfgSaved.url), terpusat: _cfgSaved.terpusat !== false};
