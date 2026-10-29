@@ -3613,9 +3613,36 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       dipakai[un] = true;
       function sukses(dilewati){ catatKredensial(un, pw); return {ok:true, username:un, dilewati:!!dilewati}; }
       if(TERPUSAT()){
-        return api("register_user", {user:{username:un, nama:item.name, peran:item.role.toLowerCase(), password:pw, ref_id:item.refId || ""}})
-          .then(function(r){
-            if(!r || !r.ok) throw new Error((r && r.error) || "Server menolak pembuatan akun.");
+        /* Pembuatan akun massal (ratusan akun) berjalan lama; satu
+           permintaan yang tersendat sesaat — server lambat membalas,
+           sinyal putus sebentar, laju permintaan dibatasi sesaat —
+           tidak boleh langsung menggagalkan akun itu, karena antrean
+           pembuatan akun saat impor dulu menyisakan ratusan siswa
+           tanpa akun persis lewat kegagalan sesaat semacam ini.
+           Kegagalan yang tampak sementara dicoba lagi sampai 3 kali
+           dengan jeda yang bertambah; kegagalan tetap (data memang
+           ditolak server) langsung dilaporkan. Aman diulang: bila
+           percobaan pertama sebenarnya berhasil di server tetapi
+           jawabannya tidak sampai ke halaman, percobaan ulang menerima
+           jawaban "sudah dipakai" yang oleh penangkap galat di bawah
+           dihitung sebagai dilewati — bukan gagal, bukan ganda. */
+        function daftarSekali(){
+          return api("register_user", {user:{username:un, nama:item.name, peran:item.role.toLowerCase(), password:pw, ref_id:item.refId || ""}})
+            .then(function(r){
+              if(!r || !r.ok) throw new Error((r && r.error) || "Server menolak pembuatan akun.");
+              return r;
+            });
+        }
+        function daftarDenganUlang(percobaan){
+          return daftarSekali().catch(function(e){
+            var msg = (e && e.message) ? e.message : String(e || "");
+            var sementara = /tidak merespons|gagal menghubungi server|terlalu banyak|too many|kuota|quota|sementara|internal error|service unavailable|sibuk/i.test(msg);
+            if(!sementara || percobaan >= 3) throw e;
+            return new Promise(function(res){ setTimeout(res, 2000 * percobaan); }).then(function(){ return daftarDenganUlang(percobaan + 1); });
+          });
+        }
+        return daftarDenganUlang(1)
+          .then(function(){
             /* Bila username akhir berbeda dari yang tercatat pada baris
                data siswa, samakan catatannya agar Data Siswa konsisten. */
             if(item.role === "Siswa" && item.refId && item.username && item.username !== un){
@@ -4772,13 +4799,203 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     /* ---------- lapisan data jurnal ---------- */
     function jrCall(action, params){
-      if(TERPUSAT()){
-        return api(action, params || {}).then(function(r){
-          if(!r || !r.ok) throw new Error((r && r.error) || "Server menolak permintaan jurnal.");
-          return r;
+      if(TERPUSAT()) return jrRemote(action, params || {});
+      return Promise.resolve().then(function(){ return jrLocal(action, params || {}); });
+    }
+    /* ============================================================
+       PENYESUAI MODE TERPUSAT (menu Mengajar)
+       Kontrak backend server (aksi jr_) berbeda bentuk dari bentuk
+       yang dipakai tampilan & mode lokal:
+       - daftar/hasil dibungkus {data: ...}, bukan {jurnal:/nilai:/...}
+       - presensi & nilai dikunci oleh ID baris Siswa di server,
+         sedangkan tampilan memakai NISN
+       - simpan presensi memakai parameter datar {tanggal, kelas,
+         rincian}; simpan nilai memakai {items:[{siswa_id,...}]};
+         simpan kolom memakai {data:{..., kolom_khusus:[...]}} dan
+         KKM guru disimpan terpisah lewat jr_pengaturan_set
+       - server TIDAK menyediakan isi-awal presensi dari jurnal dan
+         TIDAK menyimpan kegiatan/catatan jurnal (tab Jurnal di
+         server memang tidak mempunyai kedua kolom itu)
+       Fungsi-fungsi di bawah menerjemahkan dua arah agar tampilan
+       bekerja sama persis di kedua mode. Isi-awal presensi dari
+       jurnal disusun di sini dari daftar jurnal server tanggal itu.
+       ============================================================ */
+    function jrApi(action, params){
+      return api(action, params || {}).then(function(r){
+        if(!r || !r.ok) throw new Error((r && r.error) || "Server menolak permintaan jurnal.");
+        return r;
+      });
+    }
+    function jrSiswaByNisn(nisn){
+      return DB.students.find(function(s){ return String(s.nisn) === String(nisn); }) || null;
+    }
+    function jrIdDariNisn(nisn){
+      var s = jrSiswaByNisn(nisn);
+      return s && s._id ? String(s._id) : String(nisn);
+    }
+    function jrNisnDariId(sid){
+      var s = DB.students.find(function(x){ return String(x._id || "") === String(sid); });
+      return s ? String(s.nisn) : String(sid);
+    }
+    function jrPetakanJurnal(j){
+      var th = jrArr(j.tidak_hadir).map(function(x){ return String(x); });
+      var total = jrRoster(j.kelas).length;
+      return {id: String(j.id || ""), username: jrUserSaya(), nama: j.guru_nama || jrNamaSaya(),
+        tanggal: String(j.tanggal || "").slice(0, 10), kelas: j.kelas || "", jam_ke: j.jam_ke || "",
+        mapel: j.mapel || "", materi: j.materi || "", kegiatan: j.kegiatan || "", catatan: j.catatan || "",
+        tidak_hadir: th, jml_tidak_hadir: th.length,
+        jml_hadir: total ? Math.max(0, total - th.length) : null};
+    }
+    function jrPetakanPresensi(row){
+      if(!row) return null;
+      var rinc = row.rincian || {};
+      if(typeof rinc === "string"){ try { rinc = JSON.parse(rinc || "{}"); } catch(e){ rinc = {}; } }
+      var perNisn = {}, jH = 0, jT = 0;
+      Object.keys(rinc).forEach(function(sid){
+        perNisn[jrNisnDariId(sid)] = rinc[sid];
+        if(rinc[sid] === "H") jH++; else if(rinc[sid]) jT++;
+      });
+      return {id: String(row.id || ""), tanggal: String(row.tanggal || "").slice(0, 10), kelas: row.kelas || "",
+        rincian: perNisn, jml_hadir: jH, jml_tidak_hadir: jT};
+    }
+    function jrCfgDariServer(dataKolom, kkm){
+      var d = dataKolom || {};
+      return {kkm: (kkm === undefined || kkm === null || isNaN(Number(kkm))) ? 75 : Number(kkm),
+        jml_uh: Math.min(10, Math.max(1, parseInt(d.jml_uh, 10) || 2)),
+        jml_tugas: Math.min(10, Math.max(1, parseInt(d.jml_tugas, 10) || 1)),
+        khusus: jrArr(d.kolom_khusus).map(function(x){ return String(x); }).filter(Boolean)};
+    }
+    function jrRemote(action, p){
+      if(action === "jr_jurnal_list"){
+        return jrApi("jr_jurnal_list", {bulan: p.bulan || ""}).then(function(r){
+          return {ok:true, jurnal: jrArr(r.data).map(jrPetakanJurnal)};
         });
       }
-      return Promise.resolve().then(function(){ return jrLocal(action, params || {}); });
+      if(action === "jr_jurnal_save"){
+        var j = p.jurnal || {};
+        return jrApi("jr_jurnal_save", {jurnal: {id: j.id || "", tanggal: j.tanggal, kelas: j.kelas,
+            jam_ke: j.jam_ke || "", materi: j.materi, tidak_hadir: jrArr(j.tidak_hadir)}}).then(function(r){
+          var hasil = r.data ? jrPetakanJurnal(r.data) : j;
+          hasil.kegiatan = j.kegiatan || ""; hasil.catatan = j.catatan || "";
+          return {ok:true, jurnal: hasil};
+        });
+      }
+      if(action === "jr_jurnal_delete"){
+        return jrApi("jr_jurnal_delete", {id: p.id}).then(function(){ return {ok:true}; });
+      }
+      if(action === "jr_presensi_get"){
+        return jrApi("jr_presensi_get", {tanggal: p.tanggal, kelas: p.kelas}).then(function(r){
+          if(r.data) return {ok:true, presensi: jrPetakanPresensi(r.data), dari_jurnal: null};
+          /* Belum ada presensi tersimpan: susun isi awal dari jurnal
+             guru ini pada tanggal & kelas yang sama (nama tidak hadir). */
+          return jrApi("jr_jurnal_list", {bulan: String(p.tanggal || "").slice(0, 7)}).then(function(r2){
+            var namaSet = [];
+            jrArr(r2.data).forEach(function(j){
+              if(String(j.tanggal || "").slice(0, 10) === p.tanggal && String(j.kelas || "").toUpperCase() === String(p.kelas || "").toUpperCase()){
+                jrArr(j.tidak_hadir).forEach(function(n){ if(namaSet.indexOf(n) < 0) namaSet.push(n); });
+              }
+            });
+            return {ok:true, presensi: null, dari_jurnal: namaSet.length ? {nama_tidak_hadir: namaSet} : null};
+          });
+        });
+      }
+      if(action === "jr_presensi_save"){
+        var pr = p.presensi || {};
+        var rincId = {};
+        Object.keys(pr.rincian || {}).forEach(function(nisn){ rincId[jrIdDariNisn(nisn)] = pr.rincian[nisn]; });
+        return jrApi("jr_presensi_save", {tanggal: pr.tanggal, kelas: pr.kelas, rincian: rincId}).then(function(r){
+          return {ok:true, presensi: jrPetakanPresensi(r.data)};
+        });
+      }
+      if(action === "jr_presensi_rekap"){
+        return jrApi("jr_presensi_rekap", {bulan: p.bulan, kelas: p.kelas}).then(function(r){
+          return {ok:true,
+            sesi: jrArr(r.sessions).map(jrPetakanPresensi),
+            ringkas: jrArr(r.perSiswa).map(function(x){
+              return {nis: String(x.nisn || ""), nama: x.nama || "", H: x.H || 0, S: x.S || 0, I: x.I || 0, A: x.A || 0};
+            })};
+        });
+      }
+      if(action === "jr_kolom_get"){
+        return Promise.all([jrApi("jr_kolom_get", {}), jrApi("jr_pengaturan_get", {})]).then(function(rs){
+          return {ok:true, kolom: Object.assign(jrCfgDariServer(rs[0].data, rs[1].kkm), {kelas: p.kelas})};
+        });
+      }
+      if(action === "jr_kolom_save"){
+        var cfg = p.kolom || {};
+        var data = {jml_uh: cfg.jml_uh, jml_tugas: cfg.jml_tugas,
+          kolom_khusus: jrArr(cfg.khusus).map(function(x){ return String(x); }),
+          kolom_tampil: jrKolomNama(cfg)};
+        var janji = [jrApi("jr_kolom_save", {data: data})];
+        if(cfg.kkm !== undefined && cfg.kkm !== null && cfg.kkm !== "") janji.push(jrApi("jr_pengaturan_set", {kkm: cfg.kkm}));
+        return Promise.all(janji).then(function(rs){
+          return {ok:true, kolom: Object.assign(jrCfgDariServer(rs[0].data || data, cfg.kkm), {kelas: p.kelas})};
+        });
+      }
+      if(action === "jr_nilai_get"){
+        return Promise.all([jrApi("jr_nilai_get", {kelas: p.kelas}), jrApi("jr_kolom_get", {})]).then(function(rs){
+          return {ok:true,
+            nilai: jrArr(rs[0].data).map(function(n){ return {nis: String(n.nisn || ""), kolom: n.kolom, nilai: n.nilai}; }),
+            kolom: Object.assign(jrCfgDariServer(rs[1].data, rs[0].kkm), {kelas: p.kelas})};
+        });
+      }
+      if(action === "jr_nilai_save"){
+        /* Lewatkan hanya sel yang terisi atau yang isinya dihapus dari
+           nilai yang sebelumnya tampil; sel kosong yang memang belum
+           pernah terisi tidak perlu dikirim ke server. */
+        var petaLama = (typeof jrNState !== "undefined" && jrNState && jrNState.map) ? jrNState.map : {};
+        var items = [];
+        jrArr(p.nilai).forEach(function(en){
+          var kunci = en.nis + "|" + en.kolom;
+          var kosong = en.nilai === "" || en.nilai === null || en.nilai === undefined;
+          var lama = petaLama[kunci];
+          var lamaKosong = lama === "" || lama === null || lama === undefined;
+          if(kosong && lamaKosong) return;
+          items.push({siswa_id: jrIdDariNisn(en.nis), nisn: String(en.nis), kolom: String(en.kolom), nilai: kosong ? "" : en.nilai});
+        });
+        var urutan = Promise.resolve({ok:true});
+        for(var i = 0; i < items.length; i += 40){
+          (function(potong){
+            urutan = urutan.then(function(){ return jrApi("jr_nilai_save", {kelas: p.kelas, items: potong}); });
+          })(items.slice(i, i + 40));
+        }
+        return urutan.then(function(){ return {ok:true}; });
+      }
+      if(action === "jr_pengaturan_get"){
+        return jrApi("jr_pengaturan_get", {}).then(function(r){
+          return {ok:true, pengaturan: {kkm_default: (r.kkm === undefined ? 75 : r.kkm), periode: ""}};
+        });
+      }
+      if(action === "jr_pengaturan_set"){
+        var kk = p.pengaturan && p.pengaturan.kkm_default;
+        if(kk === undefined || kk === null) return Promise.resolve({ok:true, pengaturan: p.pengaturan || {}});
+        return jrApi("jr_pengaturan_set", {kkm: kk}).then(function(r){
+          return {ok:true, pengaturan: {kkm_default: r.kkm, periode: ""}};
+        });
+      }
+      if(action === "jr_monitoring"){
+        return jrApi("jr_monitoring", {bulan: p.bulan || ""}).then(function(r){
+          return {ok:true, rows: jrArr(r.data).map(function(x){
+            var gid = String(x.guru_id || "");
+            var akun = DB.users.find(function(u){ return u.role === "Guru" && (String(u._guruId || "") === gid || String(u._refId || "") === gid); });
+            return {username: akun ? akun.username : gid, nama: x.guru_nama || "", mapel: x.mapel || "",
+              jml_jurnal: x.jurnal_bulan || 0, jml_presensi: x.presensi_bulan || 0,
+              nilai_terisi: x.nilai_total || 0, rata: (x.nilai_rata === undefined ? null : x.nilai_rata),
+              terakhir: x.aktivitas_terakhir ? String(x.aktivitas_terakhir).slice(0, 10) : ""};
+          })};
+        });
+      }
+      if(action === "jr_detail_guru"){
+        var akun2 = DB.users.find(function(u){ return u.username === p.username; });
+        var gid2 = akun2 ? (akun2._guruId || akun2._refId || p.username) : p.username;
+        return jrApi("jr_detail_guru", {guru_id: gid2, bulan: p.bulan || ""}).then(function(r){
+          return {ok:true,
+            jurnal: jrArr(r.jurnal).map(jrPetakanJurnal),
+            presensi: jrArr(r.presensi).map(jrPetakanPresensi),
+            nilai: jrArr(r.nilai).map(function(n){ return {nis: String(n.nisn || ""), kolom: n.kolom, nilai: n.nilai, kelas: n.kelas || ""}; })};
+        });
+      }
+      return jrApi(action, p);
     }
     function jrArr(x){ return Array.isArray(x) ? x : []; }
     function jrLocal(action, p){
@@ -5104,7 +5321,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           .sort(function(a, b){ return parseInt(a, 10) - parseInt(b, 10); }).join(", ");
         var data = {id: isEdit ? j.id : "", tanggal: tanggal, kelas: kelas, jam_ke: jam, materi: materi,
           kegiatan: document.getElementById("fjKegiatan").value.trim(), catatan: document.getElementById("fjCatatan").value.trim(), tidak_hadir: thSel};
-        jrCall("jr_jurnal_save", {jurnal: data}).then(function(){ closeModal(); toast("Jurnal tersimpan."); gotoView("jr-jurnal"); })
+        jrCall("jr_jurnal_save", {jurnal: data}).then(function(){ closeModal(); toast("Jurnal tersimpan."); jrJState.bulan = String(tanggal).slice(0, 7); gotoView("jr-jurnal"); })
           .catch(function(e){ toast(e.message); });
       };
     }
