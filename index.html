@@ -1838,24 +1838,68 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       return rows;
     }
     function readSpreadsheet(file, kind, done){
-      function selesaiAoa(aoa){
+      /* SATU-SATUNYA gerbang keluar pembacaan berkas. done() TIDAK
+         PERNAH dipanggil dari dalam blok try tahap pembacaan: callback
+         done menjalankan tahap PEMROSESAN (klasifikasi, penyimpanan,
+         pengiriman ke server), dan galat apa pun di tahap itu dulu
+         tertangkap try/catch pembacaan lalu dilaporkan sebagai "file
+         tidak dapat dibaca" / "file Excel tidak dapat dibuka" — pesan
+         baca yang menyesatkan untuk berkas .xlsx maupun .csv, dan
+         penyebab impor tampak "tetap tidak bisa" tanpa sebab yang
+         terlihat. Kini: fungsi-fungsi baca di bawah hanya MENGEMBALIKAN
+         hasil; selesai() memanggil done() di luar try pembacaan, dengan
+         penjaganya sendiri yang menampilkan galat pemrosesan apa
+         adanya (nama berkas + sebab teknisnya). */
+      function selesai(rows, err, info){
+        try { done(rows, err, info); }
+        catch(eProses){
+          try { tampilGalatImpor("File \"" + file.name + "\" terbaca, tetapi terjadi galat saat memproses isinya: " + pesanSingkatGalat(eProses)); } catch(e2){}
+        }
+      }
+      function hasilDariAoa(aoa){
         var h = prosesAoaImpor(aoa, kind);
-        done(h.rows, h.err, h.info);
+        return {rows:h.rows, err:h.err, info:h.info};
       }
       /* Periksa SEMUA sheet di berkas: pakai sheet pertama yang baris
          judulnya dikenali (sheet data tidak selalu sheet pertama);
          bila tidak ada yang dikenali, laporkan sheet terisi terbanyak
-         agar pesan galatnya tetap menyebut isi berkas yang sebenarnya. */
+         agar pesan galatnya tetap menyebut isi berkas yang sebenarnya.
+         Setiap sheet dibaca dengan penjaga tersendiri: satu sheet yang
+         rusak / tidak lazim (mis. sheet grafik atau sheet dengan
+         rentang sel rusak dari penyimpanan ulang di Excel) DILEWATI,
+         tidak lagi menggagalkan pembacaan seluruh berkas — dulu satu
+         sheet yang melempar galat membuat berkas sehat pun dilaporkan
+         "tidak dapat dibuka". */
       function selesaiWb(wb){
-        var terbaik = null, terbanyak = -1;
+        var terbaik = null, terbanyak = -1, galatSheet = "";
         for(var i = 0; i < wb.SheetNames.length; i++){
-          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], {header:1, defval:"", raw:true});
-          var h = prosesAoaImpor(aoa, kind);
-          if(!h.err){ done(h.rows, null, h.info); return; }
+          var ws = wb.Sheets[wb.SheetNames[i]];
+          if(!ws) continue;
+          var aoa = null, h = null;
+          try { aoa = XLSX.utils.sheet_to_json(ws, {header:1, defval:"", raw:true}); }
+          catch(eSheet){ if(!galatSheet) galatSheet = pesanSingkatGalat(eSheet); continue; }
+          try { h = prosesAoaImpor(aoa, kind); }
+          catch(eProses){ if(!galatSheet) galatSheet = pesanSingkatGalat(eProses); continue; }
+          if(!h.err) return {rows:h.rows, err:null, info:h.info};
           if(aoa.length > terbanyak){ terbanyak = aoa.length; terbaik = h; }
         }
-        if(terbaik) done(terbaik.rows, terbaik.err, terbaik.info);
-        else done(null, "File tidak berisi sheet data apa pun.", null);
+        if(terbaik) return {rows:terbaik.rows, err:terbaik.err, info:terbaik.info};
+        if(galatSheet) return {rows:null, err:"File \"" + file.name + "\" tidak dapat dibaca: " + galatSheet + " Coba simpan ulang berkasnya dari Excel, atau gunakan file .csv dari tombol Unduh Template.", info:null};
+        return {rows:null, err:"File tidak berisi sheet data apa pun.", info:null};
+      }
+      function pesanSingkatGalat(e){
+        var s = String((e && e.message) || e || "galat tidak dikenal").replace(/\s+/g, " ").trim();
+        return s.length > 140 ? s.slice(0, 140) + "…" : s;
+      }
+      /* ArrayBuffer → string biner per potongan (untuk percobaan baca
+         cadangan SheetJS bertipe "binary"; dipotong agar tidak melebihi
+         batas tumpukan panggilan String.fromCharCode pada berkas besar). */
+      function binerKeString(buf){
+        var b = new Uint8Array(buf || []), s = "", POTONG = 0x8000;
+        for(var i = 0; i < b.length; i += POTONG){
+          s += String.fromCharCode.apply(null, b.subarray(i, Math.min(b.length, i + POTONG)));
+        }
+        return s;
       }
       /* Deteksi berkas Excel BINER dari byte awalnya: .xlsx adalah arsip
          ZIP (diawali "PK"), .xls lama adalah OLE2 (diawali D0 CF 11 E0).
@@ -1869,35 +1913,80 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if(b.length >= 4 && b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return true; /* OLE2/.xls */
         return false;
       }
-      var PESAN_EXCEL_TAK_TERBACA = "Berkas ini adalah file Excel asli (.xlsx/.xls), tetapi isinya belum bisa dibaca di perangkat ini karena pustaka Excel tidak tersedia. Berkas Excel tidak perlu diubah — sebagai gantinya, unduh template lewat tombol Unduh Template lalu pilih file .csv, isi datanya, dan impor file .csv tersebut. File .csv dapat dibaca tanpa pustaka Excel di perangkat apa pun.";
+      var PESAN_EXCEL_TAK_TERBACA = "Berkas \"" + file.name + "\" adalah file Excel asli (.xlsx/.xls), tetapi isinya belum bisa dibaca di perangkat ini karena pustaka Excel tidak tersedia. Berkas Excel tidak perlu diubah — sebagai gantinya, unduh template lewat tombol Unduh Template lalu pilih file .csv, isi datanya, dan impor file .csv tersebut. File .csv dapat dibaca tanpa pustaka Excel di perangkat apa pun.";
       /* Jalan terakhir: baca berkas sebagai teks (CSV/TSV, atau tabel
          HTML untuk .xls ekspor aplikasi lain). Berkas Excel biner
          dihentikan di sini dengan pesan yang jelas, bukan diuraikan
          sebagai teks. */
       function bacaSebagaiTeks(buf){
-        if(berkasExcelBiner(buf)){ done(null, PESAN_EXCEL_TAK_TERBACA, null); return; }
+        if(berkasExcelBiner(buf)) return {rows:null, err:PESAN_EXCEL_TAK_TERBACA, info:null};
+        /* try ini membungkus HANYA penguraian teks menjadi baris —
+           hasilnya dikembalikan, dan done() dipanggil pemanggil di
+           luar try (lihat selesai). Sebab teknis galat penguraian
+           disertakan pada pesannya. */
         try {
           var teks = new TextDecoder("utf-8").decode(buf);
-          if(/<\s*table[\s>]/i.test(teks)){ selesaiAoa(aoaDariHtml(teks)); return; }
-          selesaiAoa(parseCsvAoa(teks));
-        } catch(err){ done(null, "File tidak dapat dibaca. Pastikan formatnya .xlsx atau .csv.", null); }
+          if(/<\s*table[\s>]/i.test(teks)) return hasilDariAoa(aoaDariHtml(teks));
+          return hasilDariAoa(parseCsvAoa(teks));
+        } catch(err){
+          return {rows:null, err:"File \"" + file.name + "\" tidak dapat dibaca (" + pesanSingkatGalat(err) + "). Pastikan formatnya .xlsx atau .csv.", info:null};
+        }
       }
       function mulai(){
         var reader = new FileReader();
         reader.onload = function(e){
           var buf = e.target.result;
-          if(window.XLSX){
-            try { selesaiWb(XLSX.read(new Uint8Array(buf), {type:"array"})); return; }
-            catch(err1){
-              try { selesaiWb(XLSX.read(new Uint8Array(buf), {type:"array", cellDates:true})); return; }
-              catch(err2){
-                if(berkasExcelBiner(buf)){ done(null, "File Excel ini tidak dapat dibuka (berkas mungkin rusak atau formatnya tidak didukung). Coba simpan ulang dari Excel, atau gunakan file .csv dari tombol Unduh Template.", null); return; }
-                bacaSebagaiTeks(buf);
+          var hasil = null;
+          if(isCsv && !berkasExcelBiner(buf)){
+            /* Berkas .csv SELALU diuraikan sebagai teks — tidak pernah
+               lewat SheetJS. SheetJS membaca kolom berisi angka murni
+               sebagai number, dan NIP 18 digit melampaui ketepatan
+               float64 (2^53): digit terakhirnya berubah saat dibaca,
+               sehingga dua NIP yang berbeda (mis. …111 dan …112) terbaca
+               SAMA dan satu guru ditolak sebagai "duplikat" palsu, atau
+               NIP tersimpan dengan digit yang salah. Teks CSV menyimpan
+               digit apa adanya, dan pengurai teks aplikasi menjaganya
+               tetap utuh dari berkas sampai klasifikasi. */
+            try { hasil = bacaSebagaiTeks(buf); }
+            catch(errC){ hasil = {rows:null, info:null, err:"File \"" + file.name + "\" tidak dapat dibaca (" + pesanSingkatGalat(errC) + "). Pastikan formatnya .xlsx atau .csv."}; }
+          } else if(window.XLSX){
+            /* Tiga cara baca dicoba berurutan sebelum menyerah: array
+               standar, array dengan tanggal sel diuraikan, lalu string
+               biner. Kegagalan satu cara tidak menutup cara berikutnya,
+               dan sebab teknis kegagalan TERAKHIR selalu disertakan pada
+               pesan galat (beserta nama berkasnya) agar tangkapan layar
+               pengguna berikutnya langsung menunjukkan penyebabnya —
+               bukan lagi pesan umum "berkas mungkin rusak". */
+            var wb = null, galatTerakhir = null;
+            var percobaan = [
+              function(){ return XLSX.read(new Uint8Array(buf), {type:"array"}); },
+              function(){ return XLSX.read(new Uint8Array(buf), {type:"array", cellDates:true}); },
+              function(){ return XLSX.read(binerKeString(buf), {type:"binary"}); }
+            ];
+            for(var pi = 0; pi < percobaan.length && !wb; pi++){
+              try { wb = percobaan[pi](); } catch(errP){ galatTerakhir = errP; }
+            }
+            if(wb){
+              try { hasil = selesaiWb(wb); }
+              catch(errS){ galatTerakhir = errS; hasil = null; }
+            }
+            if(!hasil){
+              if(berkasExcelBiner(buf)){
+                hasil = {rows:null, info:null, err:"File Excel \"" + file.name + "\" tidak dapat dibuka di perangkat ini"
+                  + (galatTerakhir ? " (" + pesanSingkatGalat(galatTerakhir) + ")" : "")
+                  + ". Coba simpan ulang dari Excel, atau gunakan file .csv dari tombol Unduh Template."};
+              } else {
+                try { hasil = bacaSebagaiTeks(buf); }
+                catch(errT){ hasil = {rows:null, info:null, err:"File \"" + file.name + "\" tidak dapat dibaca (" + pesanSingkatGalat(errT) + "). Pastikan formatnya .xlsx atau .csv."}; }
               }
             }
-          } else bacaSebagaiTeks(buf);
+          } else {
+            try { hasil = bacaSebagaiTeks(buf); }
+            catch(errT2){ hasil = {rows:null, info:null, err:"File \"" + file.name + "\" tidak dapat dibaca (" + pesanSingkatGalat(errT2) + "). Pastikan formatnya .xlsx atau .csv."}; }
+          }
+          selesai(hasil.rows, hasil.err, hasil.info);
         };
-        reader.onerror = function(){ done(null, "Gagal membaca file.", null); };
+        reader.onerror = function(){ selesai(null, "Gagal membaca file \"" + file.name + "\".", null); };
         reader.readAsArrayBuffer(file);
       }
       var isCsv = /\.csv$/i.test(file.name);
@@ -1908,8 +1997,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       toast("Memuat pustaka Excel…");
       ensureXLSX().then(function(ok){
         if(ok) mulai();
-        else if(isExcel) done(null, PESAN_EXCEL_TAK_TERBACA, null);
-        else done(null, "Pustaka Excel belum termuat. Silakan coba lagi, atau gunakan file .csv dari tombol Unduh Template.", null);
+        else if(isExcel) selesai(null, PESAN_EXCEL_TAK_TERBACA, null);
+        else selesai(null, "Pustaka Excel belum termuat. Silakan coba lagi, atau gunakan file .csv dari tombol Unduh Template.", null);
       });
     }
     /* Pengurai CSV/TSV yang sadar tanda kutip: pemisah (titik koma /
@@ -1966,16 +2055,30 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function bersihIdImpor(s){ return String(s == null ? "" : s).replace(/[^0-9]/g, ""); }
     function klasifikasiImpor(rows, kind){
       var guru = kind === "guru";
-      var hasil = { baru:[], duplikat:0, takLengkap:[], contoh:0 };
+      var hasil = { baru:[], duplikat:0, takLengkap:[], contoh:0, duplikatRows:[], gagal:[], diperbaiki:[] };
       var cx = CONTOH_IMPOR[kind];
       (rows || []).forEach(function(r, i){
         var id = bersihIdImpor(pick(r, [guru ? "nip" : "nisn"]));
         var nama = pick(r, guru ? ["nama guru","nama"] : ["nama siswa","nama"]);
-        if(cx && id === cx.id && nama.toLowerCase() === cx.nama){ hasil.contoh++; return; }
+        var namaKecil = nama.toLowerCase();
+        /* Baris contoh bawaan template dikenali dari namanya ("Contoh
+           Guru…" / "Contoh Siswa…") — bukan hanya dari pasangan NIP +
+           nama yang persis — karena NIP contoh mudah berubah angka saat
+           berkas dibuka dan disimpan ulang di Excel. */
+        if((guru && namaKecil.indexOf("contoh guru") === 0) || (!guru && namaKecil.indexOf("contoh siswa") === 0)
+           || (cx && id === cx.id && namaKecil === cx.nama)){ hasil.contoh++; return; }
         if(!id || !nama){ hasil.takLengkap.push({baris:i + 2, id:id, nama:nama}); return; }
         var sudah = guru ? DB.teachers.some(function(t){ return bersihIdImpor(t.nip) === id; })
                          : DB.students.some(function(s){ return bersihIdImpor(s.nisn) === id; });
-        if(sudah || hasil.baru.some(function(b){ return b.id === id; })){ hasil.duplikat++; return; }
+        if(sudah || hasil.baru.some(function(b){ return b.id === id; })){
+          hasil.duplikat++;
+          /* Baris yang duplikat karena SUDAH ADA di database disimpan
+             tersendiri: pada mode terpusat, impor memeriksa apakah
+             akun loginnya ada — bila belum (impor sebelumnya terputus
+             di tengah), akunnya dibuatkan pada impor ulang ini. */
+          if(sudah) hasil.duplikatRows.push({id:id, nama:nama, row:r});
+          return;
+        }
         hasil.baru.push({id:id, nama:nama, row:r});
       });
       return hasil;
@@ -1988,7 +2091,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
          dibagikan ke masing-masing guru/siswa. Juga dicatat lewat
          catatKredensial agar tersimpan di perangkat admin ini dan
          tetap dapat diunduh lagi dari menu Kelola Password kapan pun. */
-      var akunRows = hasil.baru.filter(function(b){ return b.akun; }).map(function(b){
+      hasil.gagal = hasil.gagal || [];
+      hasil.diperbaiki = hasil.diperbaiki || [];
+      /* Akun yang dapat dibagikan: akun untuk data baru + akun yang
+         dibuatkan pada impor ini untuk data lama yang sebelumnya
+         terimpor tanpa akun (hasil.diperbaiki). */
+      var sumberAkun = hasil.baru.filter(function(b){ return b.akun; }).map(function(b){
+          return {nama:b.nama, id:b.id, akun:b.akun};
+        }).concat(hasil.diperbaiki.map(function(d){ return {nama:d.nama, id:d.id, akun:d.akun}; }));
+      var akunRows = sumberAkun.map(function(b){
         catatKredensial(b.akun.username, b.akun.password);
         return [b.nama, b.id, b.akun.username, b.akun.password];
       });
@@ -1997,9 +2108,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         + '<div class="sub">' + totalBaca + ' baris data terbaca dari file' + (keServer ? ' dan diproses ke server (database terpusat)' : '') + '.</div>';
       if(hasil.baru.length){
         html += '<p style="font-size:.95rem;margin-bottom:10px"><b>' + hasil.baru.length + ' ' + label + ' berhasil ditambahkan.</b> Akun login dibuat otomatis dengan kata sandi awal acak untuk tiap akun:</p>';
-        if(hasil.baru.some(function(b){ return b.akun; })){
+        if(sumberAkun.length){
           html += '<div class="table-wrap" style="margin-bottom:10px"><table><thead><tr><th>Username</th><th>Kata Sandi Awal</th></tr></thead><tbody>'
-            + hasil.baru.map(function(b){ return b.akun ? '<tr><td><b>' + esc(b.akun.username) + '</b></td><td>' + esc(b.akun.password) + '</td></tr>' : ''; }).join("")
+            + sumberAkun.map(function(b){ return '<tr><td><b>' + esc(b.akun.username) + '</b></td><td>' + esc(b.akun.password) + '</td></tr>'; }).join("")
             + '</tbody></table></div>'
             + '<p style="font-size:.85rem;margin-bottom:10px">Unduh daftar ini lewat tombol <b>Unduh Daftar Akun</b> di bawah, lalu sampaikan ke masing-masing ' + label + '. Kata sandi awal ini juga tercatat di perangkat admin ini, jadi daftar lengkapnya dapat diunduh lagi kapan pun lewat tombol <b>Unduh Daftar Akun</b> di menu Kelola Password; kata sandi dapat diganti oleh admin lewat menu yang sama.</p>';
         }
@@ -2021,7 +2132,21 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if(hasil.takLengkap.length > 8) html += '<li>\u2026dan ' + (hasil.takLengkap.length - 8) + ' baris lainnya.</li>';
         html += '</ul>';
       }
-      if(!hasil.baru.length && !hasil.duplikat && !hasil.takLengkap.length && !hasil.contoh){
+      if(hasil.diperbaiki.length){
+        html += '<p style="font-size:.88rem;margin-bottom:8px">' + hasil.diperbaiki.length + ' ' + label + ' yang datanya sudah terdaftar sebelumnya ternyata belum memiliki akun login — akunnya telah dibuatkan sekarang dan tercantum pada daftar akun di atas.</p>';
+      }
+      if(hasil.gagal.length){
+        html += '<p style="font-size:.88rem;margin-bottom:6px"><b>' + hasil.gagal.length + ' baris gagal diproses:</b></p>'
+          + '<ul style="font-size:.85rem;margin:0 0 10px 18px;padding:0">';
+        hasil.gagal.slice(0, 8).forEach(function(g){
+          html += '<li>' + esc(g.nama || "(tanpa nama)") + (g.id ? ' (' + idLabel + ' ' + esc(g.id) + ')' : '') + ' — '
+            + (g.tahap === "akun" ? 'data tersimpan, tetapi akun login gagal dibuat: ' : 'data gagal disimpan: ') + esc(g.alasan) + '</li>';
+        });
+        if(hasil.gagal.length > 8) html += '<li>\u2026dan ' + (hasil.gagal.length - 8) + ' baris gagal lainnya.</li>';
+        html += '</ul>'
+          + '<p style="font-size:.88rem;margin-bottom:8px">Impor ulang berkas yang sama untuk mencoba lagi baris yang gagal — data yang sudah masuk akan dikenali sebagai duplikat (tidak digandakan), dan akun yang belum ada akan dibuatkan.</p>';
+      }
+      if(!hasil.baru.length && !hasil.duplikat && !hasil.takLengkap.length && !hasil.contoh && !hasil.gagal.length && !hasil.diperbaiki.length){
         html += '<p style="font-size:.88rem">File hanya berisi baris judul — belum ada baris data di bawahnya. Isi data di bawah baris judul template, lalu impor kembali.</p>';
       }
       html += '<div class="foot">'
@@ -2741,70 +2866,185 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
        (50 baris ≈ belasan KB) ditolak/dipotong diam-diam oleh peramban
        dan server Apps Script — itulah penyebab impor kelas besar dulu
        gagal tanpa pesan yang jelas. 10 baris menjaga URL tetap pendek. ---- */
+    /* Impor terpusat TAHAN PUTUS: kegagalan satu potongan data atau satu
+       akun TIDAK lagi membatalkan seluruh impor. Setiap kegagalan dicatat
+       per orang ke hasil.gagal (nama + tahap + alasan) dan sisanya terus
+       berjalan; di akhir dialog Hasil Import selalu tampil — tidak ada
+       lagi impor besar yang berhenti diam-diam di tengah dan hanya
+       menyisakan toast sekilas. Data yang sudah terdaftar tetapi belum
+       mempunyai akun login (sisa impor sebelumnya yang terputus) ikut
+       dibuatkan akunnya pada impor ulang ini (hasil.diperbaiki). */
     function imporGuruRemote(hasil, info){
+      hasil.gagal = [];
+      hasil.diperbaiki = [];
       var baru = hasil.baru.map(function(b){
         var r = b.row;
         return {id:uid("G"), nip:b.id, nama:b.nama, mapel:pick(r, ["mata pelajaran", "mapel"]) || "-",
-          telepon:pick(r, ["no. telepon/wa", "no telepon", "telepon", "no. hp", "hp"]), email:pick(r, ["email"])};
+          telepon:pick(r, ["no. telepon/wa", "no telepon", "telepon", "no. hp", "hp"]), email:pick(r, ["email"]),
+          _src:b};
       });
-      if(!baru.length){ tampilHasilImpor("guru", hasil, info, true); return; }
+      var idBaru = {};
+      hasil.baru.forEach(function(b){ idBaru[b.id] = true; });
+      var perbaiki = (hasil.duplikatRows || []).filter(function(d){
+        if(idBaru[d.id]) return false;
+        return !DB.users.some(function(u){ return u.role === "Guru" && bersihIdImpor(u.nip || "") === d.id; });
+      }).map(function(d){
+        var t = DB.teachers.find(function(x){ return bersihIdImpor(x.nip) === d.id; });
+        return {nip:d.id, nama:d.nama, _refId:(t && t._id) || ""};
+      });
+      if(!baru.length && !perbaiki.length){ tampilHasilImpor("guru", hasil, info, true); return; }
       toast("Mengimpor " + baru.length + " guru ke server…");
       var dipakai = {};
       DB.users.forEach(function(u){ dipakai[u.username] = true; });
       var idx = DB.users.filter(function(u){ return u.role === "Guru"; }).length + 1;
-      baru.forEach(function(b){
-        while(pakai["guru" + idx]) idx++;
-        b._username = "guru" + idx; dipakai[b._username] = true; idx++;
-      });
+      function usernameBaru(){
+        while(dipakai["guru" + idx]) idx++;
+        var un = "guru" + idx; dipakai[un] = true; idx++;
+        return un;
+      }
+      baru.forEach(function(b){ b._username = usernameBaru(); });
+      perbaiki.forEach(function(b){ b._username = usernameBaru(); });
+      var totalAkun = baru.length + perbaiki.length, akunSelesai = 0;
+      function catatGagal(nama, id, tahap, e){
+        hasil.gagal.push({nama:nama, id:id, tahap:tahap, alasan:(e && e.message) ? e.message : String(e || "Gagal.")});
+      }
+      function buatAkun(b, refId, sukses){
+        var pwAwal = kataSandiAwalAcak();
+        return api("register_user", {user:{username:b._username, nama:b.nama, peran:"guru", password:pwAwal, ref_id:refId}})
+          .then(function(r){
+            if(!r || !r.ok) throw new Error((r && r.error) || ("Akun login untuk " + b.nama + " gagal dibuat."));
+            sukses({username:b._username, password:pwAwal});
+          })
+          .catch(function(e){ catatGagal(b.nama, b.nip, "akun", e); })
+          .then(function(){
+            akunSelesai++;
+            if(totalAkun > 20 && akunSelesai % 25 === 0 && akunSelesai < totalAkun) toast("Mengimpor guru… " + akunSelesai + " dari " + totalAkun + " akun selesai.");
+          });
+      }
       var chain = Promise.resolve();
+      var dataOk = [];
       for(var i = 0; i < baru.length; i += 10){
         (function(chunk){
-          chain = chain.then(function(){ return api("import_rows", {sheet:"Guru", rows:chunk}); })
-            .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Import ke server gagal."); });
+          chain = chain.then(function(){
+              return api("import_rows", {sheet:"Guru", rows:chunk.map(function(b){
+                return {id:b.id, nip:b.nip, nama:b.nama, mapel:b.mapel, telepon:b.telepon, email:b.email};
+              })});
+            })
+            .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Import ke server gagal."); chunk.forEach(function(b){ dataOk.push(b); }); })
+            .catch(function(e){ chunk.forEach(function(b){ catatGagal(b.nama, b.nip, "data", e); }); });
         })(baru.slice(i, i + 10));
       }
-      baru.forEach(function(b, i){
-        var pwAwal = kataSandiAwalAcak();
-        if(hasil.baru[i]) hasil.baru[i].akun = {username:b._username, password:pwAwal};
-        chain = chain.then(function(){ return api("register_user", {user:{username:b._username, nama:b.nama, peran:"guru", password:pwAwal, ref_id:b.id}}); })
-          .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || ("Akun login untuk " + b.nama + " gagal dibuat.")); });
+      chain = chain.then(function(){
+        var c2 = Promise.resolve();
+        dataOk.forEach(function(b){
+          c2 = c2.then(function(){ return buatAkun(b, b.id, function(akun){ b._src.akun = akun; }); });
+        });
+        perbaiki.forEach(function(b){
+          c2 = c2.then(function(){ return buatAkun(b, b._refId, function(akun){ hasil.diperbaiki.push({nama:b.nama, id:b.nip, akun:akun}); }); });
+        });
+        return c2;
       });
-      chain.then(function(){ return loadAll(); })
-        .then(function(){ gotoView("guru"); tampilHasilImpor("guru", hasil, info, true); })
-        .catch(function(e){ toast(e.message); loadAll().then(function(){ gotoView("guru"); }).catch(function(){}); });
+      /* Penyelesaian TIDAK menunggu loadAll penuh: dialog Hasil Import
+         dibangun dari hasil impor itu sendiri dan tampil segera;
+         pemuatan ulang data dari server berjalan di latar belakang
+         untuk menyegarkan daftar. Dulu dialog baru tampil SETELAH
+         loadAll (13 permintaan JSONP, termasuk daftar 669 siswa)
+         selesai — bila pemuatan itu lambat atau tersendat, pengguna
+         tidak melihat hasil apa pun dan menyimpulkan impor gagal,
+         padahal datanya mungkin sudah masuk. Penjaga ganda di akhir
+         rantai juga menjamin dialog tetap tampil apa pun yang terjadi. */
+      function selesaiImporGuru(){
+        gotoView("guru");
+        tampilHasilImpor("guru", hasil, info, true);
+        loadAll().then(function(){ if(currentView === "guru") gotoView("guru"); }).catch(function(){});
+      }
+      chain.then(selesaiImporGuru, selesaiImporGuru);
     }
     function imporSiswaRemote(hasil, info){
+      hasil.gagal = [];
+      hasil.diperbaiki = [];
       var baru = hasil.baru.map(function(b){
         var r = b.row;
         return {id:uid("S"), nisn:b.id, nama:b.nama,
           lp:(pick(r, ["l/p", "jenis kelamin"]) || "L").toUpperCase().charAt(0),
-          kelas:pick(r, ["kelas"]) || "7A", username:""};
+          kelas:pick(r, ["kelas"]) || "7A", username:"", _src:b};
       });
-      if(!baru.length){ tampilHasilImpor("siswa", hasil, info, true); return; }
+      var idBaru = {};
+      hasil.baru.forEach(function(b){ idBaru[b.id] = true; });
+      var perbaiki = (hasil.duplikatRows || []).filter(function(d){
+        if(idBaru[d.id]) return false;
+        return !DB.users.some(function(u){ return u.role === "Siswa" && bersihIdImpor(u.nisn || "") === d.id; });
+      }).map(function(d){
+        var s = DB.students.find(function(x){ return bersihIdImpor(x.nisn) === d.id; });
+        return {nisn:d.id, nama:d.nama, _refId:(s && s._id) || "", _usernameTercatat:(s && s.username) || ""};
+      });
+      if(!baru.length && !perbaiki.length){ tampilHasilImpor("siswa", hasil, info, true); return; }
       toast("Mengimpor " + baru.length + " siswa ke server…");
       var dipakai = {};
       DB.users.forEach(function(u){ dipakai[u.username] = true; });
       var idx = DB.users.filter(function(u){ return u.role === "Siswa"; }).length + 1;
-      baru.forEach(function(b){
-        while(pakai["siswa" + idx]) idx++;
-        b.username = "siswa" + idx; dipakai[b.username] = true; idx++;
-      });
+      function usernameBaru(prefer){
+        if(prefer && !dipakai[prefer]){ dipakai[prefer] = true; return prefer; }
+        while(dipakai["siswa" + idx]) idx++;
+        var un = "siswa" + idx; dipakai[un] = true; idx++;
+        return un;
+      }
+      /* Akun perbaikan memakai username yang sudah tercatat pada baris
+         Siswa-nya bila masih bebas, agar kolom ID Akun pada tabel siswa
+         tetap sama dengan username akunnya. Username tercatat itu
+         ditempati LEBIH DULU, sebelum dibagikan ke siswa baru, agar
+         tidak keburu dipakai siswa lain pada impor yang sama. */
+      perbaiki.forEach(function(b){ b.username = usernameBaru(b._usernameTercatat); });
+      baru.forEach(function(b){ b.username = usernameBaru(); });
+      var totalAkun = baru.length + perbaiki.length, akunSelesai = 0;
+      function catatGagal(nama, id, tahap, e){
+        hasil.gagal.push({nama:nama, id:id, tahap:tahap, alasan:(e && e.message) ? e.message : String(e || "Gagal.")});
+      }
+      function buatAkun(b, sukses){
+        var pwAwal = kataSandiAwalAcak();
+        return api("register_user", {user:{username:b.username, nama:b.nama, peran:"siswa", password:pwAwal, ref_id:b._refId || b.id}})
+          .then(function(r){
+            if(!r || !r.ok) throw new Error((r && r.error) || ("Akun login untuk " + b.nama + " gagal dibuat."));
+            sukses({username:b.username, password:pwAwal});
+          })
+          .catch(function(e){ catatGagal(b.nama, b.nisn, "akun", e); })
+          .then(function(){
+            akunSelesai++;
+            if(totalAkun > 20 && akunSelesai % 25 === 0 && akunSelesai < totalAkun) toast("Mengimpor siswa… " + akunSelesai + " dari " + totalAkun + " akun selesai.");
+          });
+      }
       var chain = Promise.resolve();
+      var dataOk = [];
       for(var i = 0; i < baru.length; i += 10){
         (function(chunk){
-          chain = chain.then(function(){ return api("import_rows", {sheet:"Siswa", rows:chunk}); })
-            .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Import ke server gagal."); });
+          chain = chain.then(function(){
+              return api("import_rows", {sheet:"Siswa", rows:chunk.map(function(b){
+                return {id:b.id, nisn:b.nisn, nama:b.nama, lp:b.lp, kelas:b.kelas, username:b.username};
+              })});
+            })
+            .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Import ke server gagal."); chunk.forEach(function(b){ dataOk.push(b); }); })
+            .catch(function(e){ chunk.forEach(function(b){ catatGagal(b.nama, b.nisn, "data", e); }); });
         })(baru.slice(i, i + 10));
       }
-      baru.forEach(function(b, i){
-        var pwAwal = kataSandiAwalAcak();
-        if(hasil.baru[i]) hasil.baru[i].akun = {username:b.username, password:pwAwal};
-        chain = chain.then(function(){ return api("register_user", {user:{username:b.username, nama:b.nama, peran:"siswa", password:pwAwal, ref_id:b.id}}); })
-          .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || ("Akun login untuk " + b.nama + " gagal dibuat.")); });
+      chain = chain.then(function(){
+        var c2 = Promise.resolve();
+        dataOk.forEach(function(b){
+          c2 = c2.then(function(){ return buatAkun(b, function(akun){ b._src.akun = akun; }); });
+        });
+        perbaiki.forEach(function(b){
+          c2 = c2.then(function(){ return buatAkun(b, function(akun){ hasil.diperbaiki.push({nama:b.nama, id:b.nisn, akun:akun}); }); });
+        });
+        return c2;
       });
-      chain.then(function(){ return loadAll(); })
-        .then(function(){ gotoView("siswa"); tampilHasilImpor("siswa", hasil, info, true); })
-        .catch(function(e){ toast(e.message); loadAll().then(function(){ gotoView("siswa"); }).catch(function(){}); });
+      /* Sama seperti impor guru: dialog Hasil Import tampil dari hasil
+         impor itu sendiri tanpa menunggu loadAll penuh; penyegaran
+         daftar dari server berjalan di latar belakang. */
+      function selesaiImporSiswa(){
+        gotoView("siswa");
+        tampilHasilImpor("siswa", hasil, info, true);
+        loadAll().then(function(){ if(currentView === "siswa") gotoView("siswa"); }).catch(function(){});
+      }
+      chain.then(selesaiImporSiswa, selesaiImporSiswa);
     }
 
     /* ---- Admin: Data Guru ---- */
@@ -3289,46 +3529,297 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     /* ---- Admin: Kelola Password ---- */
+    /* Daftar pada halaman ini SELALU disusun dari data server (mode
+       terpusat): akun login dari tab Users DITAMBAH baris data Guru/Siswa
+       yang belum mempunyai akun login. Riwayat impor di perangkat ini
+       tidak menentukan siapa yang tampil; catatan kata sandi lokal
+       (KRED_SESI) hanya mengisi kolom Kata Sandi pada daftar unduhan,
+       tidak pernah menyaring daftar akun.
+       Kenapa bisa ada data tanpa akun: impor terpusat menyimpan DATA
+       dulu (per potongan 10 baris), sesudahnya akun login dibuat satu
+       per satu dalam antrean panjang. Antrean guru (37 akun) tuntas,
+       tetapi antrean siswa (ratusan akun) bisa terputus di tengah —
+       halaman ditutup sebelum antrean usai — sehingga baris datanya
+       ada (lengkap dengan username yang tercatat) tetapi akun loginnya
+       belum dibuat di server. Baris seperti itu tampil di sini dengan
+       status "Belum ada akun" dan dapat dibuatkan akunnya langsung
+       dari halaman ini; pembuatan massal aman diulang karena yang
+       sudah punya akun dilewati otomatis. */
+    /* Kata sandi awal untuk akun yang dibuat dari halaman ini DITENTUKAN
+       ADMIN saat pembuatan (diisi pada formulir di kartu peringatan),
+       tidak pernah tertulis di kode halaman ini — halaman ini tayang
+       publik, jadi kata sandi bawaan apa pun yang tertulis di sini dapat
+       dibaca siapa saja. Nilai isian admin hanya dipakai sesaat untuk
+       pembuatan akun dan dicatat lewat catatKredensial di perangkat ini. */
+    var kpCariQ = "";
+    var kpSedangBuat = false;
+    var kpDaftarTerakhir = [];
+
+    function kpGuruPunyaAkun(t){
+      return DB.users.some(function(u){
+        if(u.role !== "Guru") return false;
+        if(t._id && (u._refId === t._id || u._guruId === t._id)) return true;
+        return !!(u.nip && t.nip && bersihIdImpor(u.nip) === bersihIdImpor(t.nip));
+      });
+    }
+    function kpSiswaPunyaAkun(s){
+      return DB.users.some(function(u){
+        if(u.role !== "Siswa") return false;
+        if(s._id && u._refId === s._id) return true;
+        if(u.nisn && s.nisn && bersihIdImpor(u.nisn) === bersihIdImpor(s.nisn)) return true;
+        return !!(s.username && u.username === s.username);
+      });
+    }
+    /* Satu daftar gabungan: akun login yang ada + data guru/siswa yang
+       belum mempunyai akun login (hilang:true). */
+    function kpDaftarAkun(){
+      var rows = [];
+      DB.users.forEach(function(u){
+        var ket = "";
+        if(u.role === "Guru"){ var tg = teacherByNip(u.nip); ket = tg ? tg.subject : ""; }
+        if(u.role === "Siswa"){ var ts = studentByNisn(u.nisn); ket = ts ? ("Kelas " + ts.kelas) : ""; }
+        rows.push({hilang:false, akun:u, username:u.username, name:u.name, role:u.role, ket:ket});
+      });
+      DB.teachers.forEach(function(t){
+        if(kpGuruPunyaAkun(t)) return;
+        rows.push({hilang:true, akun:null, username:"", name:t.name, role:"Guru", ket:t.subject || "", refId:t._id || "", nip:t.nip || ""});
+      });
+      DB.students.forEach(function(s){
+        if(kpSiswaPunyaAkun(s)) return;
+        rows.push({hilang:true, akun:null, username:s.username || "", name:s.name, role:"Siswa", ket:"Kelas " + (s.kelas || ""), refId:s._id || "", nisn:s.nisn || ""});
+      });
+      return rows;
+    }
+    function kpKunciBaris(r){ return r.role + "|" + (r.nisn || r.nip || r.refId || r.username || r.name); }
+    function kpPetaPakai(){
+      var p = {};
+      DB.users.forEach(function(u){ p[u.username] = true; });
+      DB.students.forEach(function(s){ if(s.username) p[s.username] = true; });
+      return p;
+    }
+    /* Buat SATU akun login yang belum ada. Janji selalu selesai dengan
+       {ok:true, username} (dilewati:true bila ternyata sudah ada) atau
+       {ok:false, alasan}. Kata sandi awal ditentukan admin (parameter pw)
+       dan dicatat lewat
+       catatKredensial agar muncul pada Unduh Daftar Akun. */
+    function kpBuatSatu(item, dipakai, pw){
+      var un = "";
+      if(item.username && !userByUsername(item.username)) un = item.username;
+      else {
+        var awalan = item.role === "Guru" ? "guru" : "siswa", n = 1;
+        while(dipakai[awalan + n]) n++;
+        un = awalan + n;
+      }
+      dipakai[un] = true;
+      function sukses(dilewati){ catatKredensial(un, pw); return {ok:true, username:un, dilewati:!!dilewati}; }
+      if(TERPUSAT()){
+        return api("register_user", {user:{username:un, nama:item.name, peran:item.role.toLowerCase(), password:pw, ref_id:item.refId || ""}})
+          .then(function(r){
+            if(!r || !r.ok) throw new Error((r && r.error) || "Server menolak pembuatan akun.");
+            /* Bila username akhir berbeda dari yang tercatat pada baris
+               data siswa, samakan catatannya agar Data Siswa konsisten. */
+            if(item.role === "Siswa" && item.refId && item.username && item.username !== un){
+              return api("update", {sheet:"Siswa", id:item.refId, row:{username:un}}).then(function(){ return sukses(false); }, function(){ return sukses(false); });
+            }
+            return sukses(false);
+          })
+          .catch(function(e){
+            var msg = (e && e.message) ? e.message : String(e || "Gagal membuat akun.");
+            if(/sudah dipakai/i.test(msg)) return sukses(true);
+            return {ok:false, alasan:msg};
+          });
+      }
+      var nu = {username:un, password:pw, role:item.role, name:item.name, active:true};
+      if(item.role === "Guru") nu.nip = item.nip || null; else nu.nisn = item.nisn || null;
+      DB.users.push(nu);
+      if(item.role === "Siswa"){
+        var st = DB.students.find(function(x){ return (item.refId && x._id === item.refId) || (item.nisn && bersihIdImpor(x.nisn) === bersihIdImpor(item.nisn)); });
+        if(st) st.username = un;
+      }
+      save();
+      return Promise.resolve(sukses(false));
+    }
+    /* Buat banyak akun sekaligus: 3 pekerja sejajar, kemajuan tampil di
+       halaman, kegagalan satu akun tidak menghentikan yang lain. Aman
+       diulang — akun yang sudah ada dilewati. */
+    function kpBuatBanyak(items, tombol, pwMap){
+      if(kpSedangBuat || !items.length) return;
+      kpSedangBuat = true;
+      var info = document.getElementById("kpProgres");
+      var labelAsli = tombol.textContent;
+      tombol.disabled = true;
+      var dipakai = kpPetaPakai();
+      var i = 0, jadi = 0, dilewati = 0, gagal = [];
+      function langkah(){
+        if(info) info.textContent = "Membuat akun… selesai " + (jadi + dilewati + gagal.length) + " dari " + items.length
+          + " (" + jadi + " dibuat" + (dilewati ? ", " + dilewati + " sudah ada" : "") + (gagal.length ? ", " + gagal.length + " gagal" : "") + "). Jangan tutup halaman ini sampai selesai.";
+      }
+      langkah();
+      function pekerja(){
+        if(i >= items.length) return Promise.resolve();
+        var item = items[i++];
+        return kpBuatSatu(item, dipakai, pwMap[item.role] || "").then(function(res){
+          if(res.ok && res.dilewati) dilewati++;
+          else if(res.ok) jadi++;
+          else gagal.push(item.name + " — " + res.alasan);
+          langkah();
+          return pekerja();
+        });
+      }
+      var ws = [];
+      for(var w = 0; w < Math.min(3, items.length); w++) ws.push(pekerja());
+      Promise.all(ws).then(function(){
+        kpSedangBuat = false;
+        tombol.disabled = false; tombol.textContent = labelAsli;
+        function ringkas(){
+          toast("Pembuatan akun selesai: " + jadi + " akun dibuat" + (dilewati ? ", " + dilewati + " sudah ada" : "")
+            + (gagal.length ? ", " + gagal.length + " gagal — yang gagal tetap tampil di daftar ini untuk dicoba lagi. Alasan pertama: " + gagal[0] : "") + ".");
+          gotoView("password");
+        }
+        if(TERPUSAT()) loadAll().then(ringkas, ringkas); else ringkas();
+      });
+    }
+
     function viewAdminPassword(c){
       var roleBadge = function(r){ return r==="Admin" ? "b-admin" : (r==="Guru" ? "b-guru" : "b-siswa"); };
-      var opts = DB.users.map(function(u){ return '<option value="'+esc(u.username)+'">'+esc(u.username)+' — '+esc(u.name)+' ('+u.role+')</option>'; }).join("");
-      c.innerHTML = pageHead("Kelola Password & Akun", "Reset kata sandi serta aktif/nonaktifkan akun pengguna.",
+      var semua = kpDaftarAkun();
+      var hilang = semua.filter(function(r){ return r.hilang; });
+      var hilangGuru = hilang.filter(function(r){ return r.role === "Guru"; }).length;
+      var hilangSiswa = hilang.length - hilangGuru;
+      var kartuHilang = "";
+      if(hilang.length){
+        var rincian = [];
+        if(hilangGuru) rincian.push(hilangGuru + " guru");
+        if(hilangSiswa) rincian.push(hilangSiswa + " siswa");
+        kartuHilang = '<div class="card" style="border-color:var(--warn);background:var(--warnbg)">'
+          + '<h3>Ada ' + rincian.join(" dan ") + ' yang belum memiliki akun login</h3>'
+          + '<p class="desc" style="margin-bottom:10px">Data mereka sudah terdaftar, tetapi akun loginnya belum dibuat di server — sisa impor yang terputus di tengah pembuatan akun, sehingga selama ini mereka tidak tampil di daftar akun dan belum bisa masuk. Buatkan akun mereka sekarang lewat tombol di bawah: username mengikuti yang tercatat pada data siswa, dan kata sandi awalnya Anda tentukan sendiri pada isian berikut (satu kata sandi awal untuk semua akun baru pada tiap peran — tercatat di perangkat ini sehingga ikut muncul pada Unduh Daftar Akun). Sampaikan kata sandi itu kepada pemiliknya dan anjurkan menggantinya setelah masuk. Proses berjalan bertahap; bila terputus, ulangi saja — akun yang sudah dibuat akan dilewati.</p>'
+          + (hilangGuru ? '<div class="field" style="margin-bottom:10px"><label>Kata Sandi Awal — Akun Guru Baru (minimal 6 karakter)</label><input id="kpPwGuru" type="text" placeholder="Tentukan kata sandi awal untuk guru" autocomplete="off" /></div>' : '')
+          + (hilangSiswa ? '<div class="field" style="margin-bottom:10px"><label>Kata Sandi Awal — Akun Siswa Baru (minimal 6 karakter)</label><input id="kpPwSiswa" type="text" placeholder="Tentukan kata sandi awal untuk siswa" autocomplete="off" /></div>' : '')
+          + '<button class="btn" id="kpBuatSemua">Buat ' + hilang.length + ' Akun yang Belum Ada</button>'
+          + '<div id="kpProgres" style="margin-top:10px;font-size:.88rem;font-weight:600"></div></div>';
+      }
+      c.innerHTML = pageHead("Kelola Password & Akun", "Seluruh akun dari data sekolah — termasuk yang belum memiliki akun login — beserta reset kata sandi dan aktif/nonaktifkan akun.",
           '<button class="btn" id="unduhAkunBtn">Unduh Daftar Akun</button>')
+        + kartuHilang
         + '<div class="card"><h3>Ubah / Reset Password Akun</h3><p class="desc" style="margin-bottom:12px">Pilih akun, lalu masukkan kata sandi baru.</p>'
-        + '<div class="grid2"><div class="field" style="margin:0"><label>Pilih Akun</label><select id="kpAkun">'+opts+'</select></div>'
+        + '<div class="grid2"><div class="field" style="margin:0"><label>Pilih Akun</label><select id="kpAkun"></select></div>'
         + '<div class="field" style="margin:0"><label>Password Baru</label><input id="kpBaru" type="text" placeholder="Minimal 6 karakter" /></div></div>'
         + '<div style="margin-top:14px"><button class="btn" id="kpSave">Simpan Password Baru</button></div></div>'
-        + '<div class="table-wrap"><table><thead><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Status Akun</th><th>Aksi</th></tr></thead><tbody>'
-        + DB.users.map(function(u){
-            var aktif = u.active!==false;
-            return '<tr><td><b>'+esc(u.username)+'</b></td><td>'+esc(u.name)+'</td>'
-              + '<td><span class="badge '+roleBadge(u.role)+'">'+u.role+'</span></td>'
-              + '<td><span class="badge '+(aktif?"b-ok":"b-off")+'">'+(aktif?"Aktif":"Nonaktif")+'</span></td>'
-              + '<td>'+(u.username===session.username ? '<span class="pill">Akun Anda</span>'
-                  : '<button class="btn small '+(aktif?"danger":"")+'" data-toggle-akun="'+esc(u.username)+'">'+(aktif?"Nonaktifkan":"Aktifkan")+'</button>')+'</td></tr>';
-          }).join("")
-        + '</tbody></table></div>';
+        + '<div class="field" style="margin-bottom:10px"><label>Cari Akun (nama atau username)</label><input id="kpCari" type="text" placeholder="Ketik nama atau username…" value="' + esc(kpCariQ) + '" /></div>'
+        + '<p id="kpHitung" style="font-size:.85rem;color:var(--muted);margin:0 0 10px"></p>'
+        + '<div class="table-wrap"><table><thead><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Keterangan</th><th>Status Akun</th><th>Aksi</th></tr></thead><tbody id="kpTbody"></tbody></table></div>';
+
+      function renderKp(){
+        var q = kpCariQ.trim().toLowerCase();
+        var daftar = kpDaftarAkun();
+        kpDaftarTerakhir = daftar;
+        var tampil = daftar.filter(function(r){
+          return !q || r.name.toLowerCase().indexOf(q) >= 0 || (r.username || "").toLowerCase().indexOf(q) >= 0;
+        });
+        var nAkun = daftar.filter(function(r){ return !r.hilang; }).length;
+        var nHilang = daftar.length - nAkun;
+        document.getElementById("kpHitung").textContent = "Menampilkan " + tampil.length + " dari " + daftar.length + " nama · "
+          + nAkun + " akun login" + (nHilang ? " · " + nHilang + " belum ada akun" : "") + ".";
+        var sel = document.getElementById("kpAkun");
+        var pilihanLama = sel.value;
+        sel.innerHTML = tampil.filter(function(r){ return !r.hilang; }).map(function(r){
+          return '<option value="' + esc(r.username) + '">' + esc(r.username) + ' — ' + esc(r.name) + ' (' + r.role + ')</option>';
+        }).join("");
+        if(pilihanLama && userByUsername(pilihanLama)) sel.value = pilihanLama;
+        document.getElementById("kpTbody").innerHTML = tampil.map(function(r){
+          if(r.hilang){
+            return '<tr><td><b>' + esc(r.username || "—") + '</b></td><td>' + esc(r.name) + '</td>'
+              + '<td><span class="badge ' + roleBadge(r.role) + '">' + r.role + '</span></td>'
+              + '<td>' + esc(r.ket || "") + '</td>'
+              + '<td><span class="badge b-warn">Belum ada akun</span></td>'
+              + '<td><button class="btn small" data-buat-akun="' + esc(kpKunciBaris(r)) + '">Buat Akun</button></td></tr>';
+          }
+          var u = r.akun, aktif = u.active !== false;
+          return '<tr><td><b>' + esc(u.username) + '</b></td><td>' + esc(u.name) + '</td>'
+            + '<td><span class="badge ' + roleBadge(u.role) + '">' + u.role + '</span></td>'
+            + '<td>' + esc(r.ket || "") + '</td>'
+            + '<td><span class="badge ' + (aktif ? "b-ok" : "b-off") + '">' + (aktif ? "Aktif" : "Nonaktif") + '</span></td>'
+            + '<td>' + (u.username === session.username ? '<span class="pill">Akun Anda</span>'
+                : '<button class="btn small ' + (aktif ? "danger" : "") + '" data-toggle-akun="' + esc(u.username) + '">' + (aktif ? "Nonaktifkan" : "Aktifkan") + '</button>') + '</td></tr>';
+        }).join("") || '<tr><td colspan="6"><div class="empty">Tidak ada akun yang cocok dengan pencarian.</div></td></tr>';
+        ikatKpTombol();
+      }
+      function ikatKpTombol(){
+        Array.prototype.forEach.call(c.querySelectorAll("[data-toggle-akun]"), function(b){
+          b.onclick = function(){
+            var u = userByUsername(b.getAttribute("data-toggle-akun")); if(!u) return;
+            if(TERPUSAT()){
+              var target = (u.active === false) ? "Aktif" : "Nonaktif";
+              api("set_status", {username:u.username, status:target})
+                .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Gagal mengubah status akun di server."); return loadAll(); })
+                .then(function(){ toast("Akun " + u.username + " sekarang " + target.toLowerCase() + "."); gotoView("password"); })
+                .catch(remoteFail);
+              return;
+            }
+            u.active = (u.active === false); save();
+            toast("Akun " + u.username + " sekarang " + (u.active ? "aktif" : "nonaktif") + ".");
+            gotoView("password");
+          };
+        });
+        Array.prototype.forEach.call(c.querySelectorAll("[data-buat-akun]"), function(b){
+          b.onclick = function(){
+            if(kpSedangBuat) return;
+            var kunci = b.getAttribute("data-buat-akun");
+            var item = kpDaftarTerakhir.filter(function(r){ return r.hilang && kpKunciBaris(r) === kunci; })[0];
+            if(!item) return;
+            var pwMap = kpPwDariIsian(); if(!pwMap) return;
+            b.disabled = true; b.textContent = "Membuat…";
+            kpBuatSatu(item, kpPetaPakai(), pwMap[item.role] || "").then(function(res){
+              if(!res.ok){ toast("Akun untuk " + item.name + " gagal dibuat: " + res.alasan); b.disabled = false; b.textContent = "Buat Akun"; return; }
+              function selesai(){
+                toast("Akun " + res.username + " untuk " + item.name + " berhasil dibuat dengan kata sandi awal yang Anda tentukan.");
+                gotoView("password");
+              }
+              if(TERPUSAT()) loadAll().then(selesai, selesai); else selesai();
+            });
+          };
+        });
+      }
+      renderKp();
+      document.getElementById("kpCari").addEventListener("input", function(e){ kpCariQ = e.target.value; renderKp(); });
+      function kpPwDariIsian(){
+        /* Baca kata sandi awal yang ditentukan admin pada kartu
+           peringatan. Mengembalikan null + pesan bila belum sah. */
+        var daftar = kpDaftarAkun();
+        var adaGuru = daftar.some(function(r){ return r.hilang && r.role === "Guru"; });
+        var adaSiswa = daftar.some(function(r){ return r.hilang && r.role === "Siswa"; });
+        var elG = document.getElementById("kpPwGuru"), elS = document.getElementById("kpPwSiswa");
+        var pwG = elG ? elG.value : "", pwS = elS ? elS.value : "";
+        if(adaGuru && pwG.length < 6){ toast("Isi dulu kata sandi awal untuk akun guru baru (minimal 6 karakter) pada kartu kuning di atas."); if(elG) elG.focus(); return null; }
+        if(adaSiswa && pwS.length < 6){ toast("Isi dulu kata sandi awal untuk akun siswa baru (minimal 6 karakter) pada kartu kuning di atas."); if(elS) elS.focus(); return null; }
+        return {Guru:pwG, Siswa:pwS};
+      }
+      var btnSemua = document.getElementById("kpBuatSemua");
+      if(btnSemua) btnSemua.onclick = function(){
+        var pwMap = kpPwDariIsian(); if(!pwMap) return;
+        kpBuatBanyak(kpDaftarAkun().filter(function(r){ return r.hilang; }), btnSemua, pwMap);
+      };
       document.getElementById("unduhAkunBtn").onclick = function(){
-        var rowsAkun = DB.users.map(function(u){
-          var sandi;
+        var rowsAkun = kpDaftarAkun().map(function(r){
+          if(r.hilang) return [r.username || "—", r.name, r.role, r.ket || "", "Belum ada akun login", "—"];
+          var u = r.akun, sandi;
           if(!TERPUSAT()) sandi = u.password || KRED_SESI[u.username] || "—";
           else sandi = KRED_SESI[u.username] || "—";
-          var ket = "";
-          if(u.role === "Guru"){ var tg = teacherByNip(u.nip); ket = tg ? tg.subject : ""; }
-          if(u.role === "Siswa"){ var ts = studentByNisn(u.nisn); ket = ts ? ("Kelas " + ts.kelas) : ""; }
-          return [u.username, u.name, u.role, ket, u.active === false ? "Nonaktif" : "Aktif", sandi];
+          return [u.username, u.name, u.role, r.ket || "", u.active === false ? "Nonaktif" : "Aktif", sandi];
         });
         var catatanAkun = TERPUSAT()
-          ? 'Kolom <b>Kata Sandi</b> terisi untuk akun yang kata sandinya <b>dibuat atau diatur lewat aplikasi ini di perangkat ini</b> (saat tambah/import akun atau reset di halaman ini) — catatannya tersimpan di perangkat ini, jadi daftar ini dapat diunduh lagi kapan pun dari perangkat yang sama. Akun bertanda "—" kata sandinya tidak tercatat di perangkat ini (misalnya dibuat di luar aplikasi atau di perangkat lain) dan di server hanya tersimpan terenkripsi (hash) sehingga tidak dapat ditampilkan kembali; bila pemiliknya lupa, atur kata sandi baru lewat formulir di halaman ini — kata sandi barunya otomatis tercatat dan muncul pada daftar unduhan berikutnya.'
+          ? 'Kolom <b>Kata Sandi</b> terisi untuk akun yang kata sandinya <b>dibuat atau diatur lewat aplikasi ini di perangkat ini</b> (saat tambah/import akun, pembuatan akun dari halaman Kelola Password, atau reset di halaman ini) — catatannya tersimpan di perangkat ini, jadi daftar ini dapat diunduh lagi kapan pun dari perangkat yang sama. Akun bertanda "—" kata sandinya tidak tercatat di perangkat ini (misalnya dibuat di luar aplikasi atau di perangkat lain) dan di server hanya tersimpan terenkripsi (hash) sehingga tidak dapat ditampilkan kembali; bila pemiliknya lupa, atur kata sandi baru lewat formulir di halaman ini — kata sandi barunya otomatis tercatat dan muncul pada daftar unduhan berikutnya. Baris berstatus <b>"Belum ada akun login"</b> adalah data guru/siswa yang akun loginnya belum dibuat di server (sisa impor yang terputus) — buatkan akunnya lewat tombol pada halaman Kelola Password dengan kata sandi awal yang Anda tentukan di sana — kata sandi itu ikut tercatat dan muncul pada daftar ini.'
           : 'Daftar ini berisi kata sandi akun pada data lokal perangkat ini. Simpan file unduhan di tempat aman dan sampaikan kata sandi hanya kepada pemilik akun masing-masing.';
         modalUnduhTabel("Daftar Akun Pengguna — Username & Kata Sandi",
-          "Seluruh akun guru, siswa, dan admin, lengkap dengan kata sandi yang tercatat di perangkat ini, untuk dibagikan kepada pemilik akun masing-masing. Akun yang kata sandinya belum tercatat bertanda \"—\" — lihat catatan di bawah daftar.",
+          "Seluruh guru, siswa, dan admin dari data sekolah, lengkap dengan kata sandi yang tercatat di perangkat ini, untuk dibagikan kepada pemilik akun masing-masing. Baris yang belum memiliki akun login ditandai khusus — lihat catatan di bawah daftar.",
           ["Username", "Nama", "Peran", "Keterangan", "Status", "Kata Sandi"], rowsAkun,
           "daftar-akun-pengguna", catatanAkun);
       };
       document.getElementById("kpSave").onclick = function(){
         var un = document.getElementById("kpAkun").value;
         var baru = document.getElementById("kpBaru").value;
+        if(!un){ toast("Tidak ada akun yang dipilih."); return; }
         if(baru.length < 6){ toast("Password baru minimal 6 karakter."); return; }
         if(TERPUSAT()){
           api("change_password", {username:un, new_password:baru}).then(function(r){
@@ -3342,25 +3833,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var u = userByUsername(un); if(!u) return;
         u.password = baru; save();
         catatKredensial(un, baru);
-        toast("Password akun "+un+" berhasil diubah.");
-        if(un===session.username) toast("Password Anda diperbarui. Gunakan password baru saat login berikutnya.");
+        toast("Password akun " + un + " berhasil diubah.");
+        if(un === session.username) toast("Password Anda diperbarui. Gunakan password baru saat login berikutnya.");
       };
-      Array.prototype.forEach.call(c.querySelectorAll("[data-toggle-akun]"), function(b){
-        b.onclick = function(){
-          var u = userByUsername(b.getAttribute("data-toggle-akun")); if(!u) return;
-          if(TERPUSAT()){
-            var target = (u.active === false) ? "Aktif" : "Nonaktif";
-            api("set_status", {username:u.username, status:target})
-              .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Gagal mengubah status akun di server."); return loadAll(); })
-              .then(function(){ toast("Akun " + u.username + " sekarang " + target.toLowerCase() + "."); gotoView("password"); })
-              .catch(remoteFail);
-            return;
-          }
-          u.active = (u.active===false); save();
-          toast("Akun "+u.username+" sekarang "+(u.active?"aktif":"nonaktif")+".");
-          gotoView("password");
-        };
-      });
     }
 
     /* ================= DASHBOARD GURU ================= */
