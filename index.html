@@ -255,6 +255,44 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       .pill.warn-pill{background:var(--warnbg);color:var(--warn)}
       .demo-akun{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
       .demo-akun .demo-btns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+      /* ---- Daftar jurnal: tabel lebar penuh yang menyesuaikan layar ---- */
+      .jr-jurnal-info{color:var(--muted);font-size:.86rem;margin:0 0 10px}
+      .jr-jurnal-wrap{width:100%}
+      .jr-jurnal-table{width:100%;min-width:0}
+      .jr-jurnal-table td{overflow-wrap:anywhere}
+      .jr-jurnal-table td.jr-col-kelas,.jr-jurnal-table td.jr-col-jam{white-space:nowrap}
+      .jr-jurnal-materi{font-weight:700;line-height:1.45}
+      .jr-jurnal-sub{margin-top:5px;font-size:.86rem;font-weight:400;line-height:1.55}
+      .jr-jurnal-sub.muted{color:var(--muted)}
+      .jr-jurnal-hadir{white-space:nowrap}
+      .jr-jurnal-nama{margin-top:5px;font-size:.84rem;color:var(--muted);line-height:1.55;white-space:normal}
+      .jr-jurnal-aksi{display:flex;gap:6px;flex-wrap:wrap}
+      .jr-jurnal-aksi .btn{white-space:nowrap}
+      @media screen and (max-width:860px){
+        .jr-jurnal-wrap{border:none;background:transparent;border-radius:0;overflow:visible}
+        .jr-jurnal-table,.jr-jurnal-table tbody,.jr-jurnal-table tr,.jr-jurnal-table td{display:block;width:100%}
+        .jr-jurnal-table thead{display:none}
+        .jr-jurnal-table tr{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:12px;padding:4px 0}
+        .jr-jurnal-table td{display:grid;grid-template-columns:104px minmax(0,1fr);gap:10px;align-items:start;padding:10px 14px;border-bottom:1px solid var(--line)}
+        .jr-jurnal-table tr td:last-child{border-bottom:none}
+        .jr-jurnal-table td::before{content:attr(data-label);font-size:.7rem;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);padding-top:3px}
+        .jr-jurnal-table td.jr-col-kelas,.jr-jurnal-table td.jr-col-jam,.jr-jurnal-hadir{white-space:normal}
+      }
+      @media screen and (max-width:420px){
+        .jr-jurnal-table td{grid-template-columns:88px minmax(0,1fr);padding:9px 12px}
+      }
+      /* ---- Rekap Jurnal (Cetak & Rekap): khusus A4 landscape ---- */
+      @page jr-rekap-jurnal{size:A4 landscape;margin:12mm 11mm}
+      .jr-rekap-jurnal{page:jr-rekap-jurnal}
+      .jr-doc-jurnal-table{width:100%;min-width:0;table-layout:fixed;font-size:.82rem}
+      .jr-doc-jurnal-table th,.jr-doc-jurnal-table td{overflow-wrap:anywhere;padding:10px 8px}
+      .jr-doc-jurnal-table th{white-space:normal;line-height:1.35}
+      .jr-doc-jurnal-table td.jr-c{text-align:center}
+      @media print{
+        .jr-rekap-jurnal .table-wrap{border:none;overflow:visible}
+        .jr-doc-jurnal-table{font-size:.78rem}
+        .jr-doc-jurnal-table thead{display:table-header-group}
+      }
     </style>
   </head>
   <body>
@@ -4813,9 +4851,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
          rincian}; simpan nilai memakai {items:[{siswa_id,...}]};
          simpan kolom memakai {data:{..., kolom_khusus:[...]}} dan
          KKM guru disimpan terpisah lewat jr_pengaturan_set
-       - server TIDAK menyediakan isi-awal presensi dari jurnal dan
-         TIDAK menyimpan kegiatan/catatan jurnal (tab Jurnal di
-         server memang tidak mempunyai kedua kolom itu)
+       - server TIDAK menyediakan isi-awal presensi dari jurnal
+       - kegiatan & catatan jurnal ikut dikirim saat menyimpan dan
+         dipetakan saat membaca (memerlukan tab Jurnal di server yang
+         mempunyai kedua kolom itu; bila server masih versi lama,
+         kedua nilai tetap tampil pada sesi yang sedang berjalan)
        Fungsi-fungsi di bawah menerjemahkan dua arah agar tampilan
        bekerja sama persis di kedua mode. Isi-awal presensi dari
        jurnal disusun di sini dari daftar jurnal server tanggal itu.
@@ -4874,7 +4914,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if(action === "jr_jurnal_save"){
         var j = p.jurnal || {};
         return jrApi("jr_jurnal_save", {jurnal: {id: j.id || "", tanggal: j.tanggal, kelas: j.kelas,
-            jam_ke: j.jam_ke || "", materi: j.materi, tidak_hadir: jrArr(j.tidak_hadir)}}).then(function(r){
+            jam_ke: j.jam_ke || "", materi: j.materi, kegiatan: j.kegiatan || "", catatan: j.catatan || "",
+            tidak_hadir: jrArr(j.tidak_hadir)}}).then(function(r){
           var hasil = r.data ? jrPetakanJurnal(r.data) : j;
           hasil.kegiatan = j.kegiatan || ""; hasil.catatan = j.catatan || "";
           return {ok:true, jurnal: hasil};
@@ -5156,11 +5197,13 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
 
     /* ---------- unduh dokumen jurnal: SELALU lewat pilihan format ---------- */
-    function jrUnduhDokumen(judul, fileBase, isiHtml, headers, rows){
+    function jrUnduhDokumen(judul, fileBase, isiHtml, headers, rows, opsi){
       dapatkanKop(function(kopUri){
+        var jurnalLandskap = !!(opsi && opsi.jurnalLandscape);
         var css = ":root{--ink:#16233a;--muted:#5b6b82;--line:#dde5ee}"
           + "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}"
           + "@page{size:A4 landscape;margin:13mm 12mm}"
+          + (jurnalLandskap ? ".jr-doc-jurnal-table{table-layout:fixed;font-size:11.5px}.jr-doc-jurnal-table th,.jr-doc-jurnal-table td{padding:6px 7px;overflow-wrap:anywhere}.jr-doc-jurnal-table th{white-space:normal;line-height:1.35}.jr-doc-jurnal-table td.jr-c{text-align:center}.jr-doc-jurnal-table thead{display:table-header-group}" : "")
           + "html{background:#dfe6ee}body{font-family:Georgia,'Times New Roman',serif;color:#16233a;margin:0;padding:24px}"
           + ".sheet{background:#fff;max-width:1120px;margin:0 auto;padding:28px 32px;box-shadow:0 4px 24px rgba(0,0,0,.15)}"
           + ".kop-wrap{text-align:center}.kop-img{width:100%}"
@@ -5224,6 +5267,18 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           : '<tr><td colspan="' + headers.length + '"><div class="empty">Belum ada data.</div></td></tr>')
         + "</tbody></table></div>";
     }
+    /* Tabel khusus Rekap Jurnal: lebar kolom diatur untuk halaman A4
+       landscape — Tanggal, Kelas, Jam Ke-, Materi, Kegiatan, Hadir,
+       Tidak Hadir, Nama Tidak Hadir, Catatan terbaca lega melebar. */
+    function jrTabelJurnalHtml(headers, rows){
+      var lebar = [3, 13, 6, 7, 19, 19, 6, 6, 11, 10];
+      var cols = headers.map(function(h, ci){ return '<col style="width:' + (lebar[ci] || 10) + '%" />'; }).join("");
+      return '<div class="table-wrap"><table class="jr-doc-jurnal-table"><colgroup>' + cols + '</colgroup><thead><tr>'
+        + headers.map(function(h){ return "<th>" + esc(h) + "</th>"; }).join("") + "</tr></thead><tbody>"
+        + (rows.length ? rows.map(function(r){ return "<tr>" + r.map(function(v, ci){ return '<td' + ((ci === 0 || ci === 6 || ci === 7) ? ' class="jr-c"' : "") + ">" + esc(v === null || v === undefined || v === "" ? "-" : v) + "</td>"; }).join("") + "</tr>"; }).join("")
+          : '<tr><td colspan="' + headers.length + '"><div class="empty">Belum ada data.</div></td></tr>')
+        + "</tbody></table></div>";
+    }
 
     /* ================= JURNAL MENGAJAR ================= */
     var jrJState = {bulan: jrBulanIni()};
@@ -5240,19 +5295,29 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var el = document.getElementById("jrJList"); if(!el) return;
         var list = jrArr(r.jurnal);
         if(!list.length){ el.innerHTML = emptyState("Belum ada jurnal pada " + jrFmtBulan(jrJState.bulan) + ". Klik \"+ Tulis Jurnal\" untuk membuat catatan pertama."); return; }
-        el.innerHTML = '<div class="item-list">' + list.map(function(j){
-          var jam = kelasList(j.jam_ke).map(function(x){ return '<span class="pill">Jam ke-' + esc(x) + "</span>"; }).join(" ");
+        el.innerHTML = '<p class="jr-jurnal-info">Menampilkan <b>' + list.length + ' jurnal</b> pada ' + esc(jrFmtBulan(jrJState.bulan)) + '.</p>'
+          + '<div class="table-wrap jr-jurnal-wrap"><table class="jr-jurnal-table"><thead><tr>'
+          + '<th>Tanggal</th><th>Kelas</th><th>Jam Ke-</th><th>Materi</th><th>Kegiatan Pembelajaran</th><th>Catatan</th><th>Kehadiran</th><th class="no-print">Aksi</th>'
+          + '</tr></thead><tbody>'
+          + list.map(function(j){
+          var jam = kelasList(j.jam_ke).join(", ") || "-";
           var th = jrArr(j.tidak_hadir);
-          return '<div class="item"><div class="top"><div><h3>' + esc(j.materi || "(Tanpa judul materi)") + '</h3>'
-            + '<div class="meta"><span class="pill">' + esc(jrFmtTgl(j.tanggal)) + '</span><span class="pill">Kelas ' + esc(j.kelas) + "</span>" + jam + "</div></div></div>"
-            + (j.kegiatan ? '<div class="body">' + esc(j.kegiatan) + "</div>" : "")
-            + (j.catatan ? '<div class="body" style="color:var(--muted)">Catatan: ' + esc(j.catatan) + "</div>" : "")
-            + '<div class="meta" style="margin-top:8px"><span class="pill">Hadir: ' + (j.jml_hadir != null ? j.jml_hadir : "-") + '</span><span class="pill">Tidak hadir: ' + (j.jml_tidak_hadir != null ? j.jml_tidak_hadir : th.length) + "</span>"
-            + (th.length ? '<span style="font-size:.85rem">Tidak hadir: ' + esc(th.join(", ")) + "</span>" : "")
-            + "</div>"
-            + '<div style="display:flex;gap:8px;margin-top:10px" class="no-print"><button class="btn small ghost" data-jr-edit="' + esc(j.id) + '">Ubah</button><button class="btn small ghost" data-jr-del="' + esc(j.id) + '">Hapus</button></div>'
-            + "</div>";
-        }).join("") + "</div>";
+          var hadir = (j.jml_hadir != null ? j.jml_hadir : "-");
+          var tidak = (j.jml_tidak_hadir != null ? j.jml_tidak_hadir : th.length);
+          return '<tr>'
+            + '<td data-label="Tanggal">' + esc(jrFmtTgl(j.tanggal)) + '</td>'
+            + '<td data-label="Kelas" class="jr-col-kelas">' + esc(j.kelas || "-") + '</td>'
+            + '<td data-label="Jam Ke-" class="jr-col-jam">' + esc(jam) + '</td>'
+            + '<td data-label="Materi"><div class="jr-jurnal-materi">' + esc(j.materi || "(Tanpa judul materi)") + '</div>'
+            + '</td>'
+            + '<td data-label="Kegiatan Pembelajaran">' + esc(j.kegiatan || "-") + '</td>'
+            + '<td data-label="Catatan">' + esc(j.catatan || "-") + '</td>'
+            + '<td data-label="Kehadiran"><span class="jr-jurnal-hadir">Hadir: ' + esc(hadir) + '</span><br/><span class="jr-jurnal-hadir">Tidak hadir: ' + esc(tidak) + '</span>'
+            + (th.length ? '<div class="jr-jurnal-nama">' + esc(th.join(", ")) + '</div>' : "")
+            + '</td>'
+            + '<td data-label="Aksi" class="no-print"><span class="jr-jurnal-aksi"><button class="btn small ghost" data-jr-edit="' + esc(j.id) + '">Ubah</button><button class="btn small ghost" data-jr-del="' + esc(j.id) + '">Hapus</button></span></td>'
+            + '</tr>';
+        }).join("") + '</tbody></table></div>';
         Array.prototype.forEach.call(el.querySelectorAll("[data-jr-edit]"), function(b){
           b.onclick = function(){ var j = list.find(function(x){ return String(x.id) === b.getAttribute("data-jr-edit"); }); if(j) formJrJurnal(j); };
         });
@@ -5646,12 +5711,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           jrCall("jr_jurnal_list", {bulan: jrCState.bulan}).then(function(r){
             var list = jrArr(r.jurnal).filter(function(j){ return j.kelas === jrCState.kelas; })
               .sort(function(a, b){ return String(a.tanggal) < String(b.tanggal) ? -1 : 1; });
-            var headers = ["No", "Tanggal", "Jam Ke-", "Materi", "Kegiatan", "Hadir", "Tidak Hadir", "Nama Tidak Hadir", "Catatan"];
-            var rows = list.map(function(j, i){ return [i + 1, jrFmtTgl(j.tanggal), kelasList(j.jam_ke).join(", ") || "-", j.materi || "-", j.kegiatan || "-", j.jml_hadir != null ? j.jml_hadir : "-", j.jml_tidak_hadir != null ? j.jml_tidak_hadir : jrArr(j.tidak_hadir).length, jrArr(j.tidak_hadir).join(", ") || "-", j.catatan || "-"]; });
+            var headers = ["No", "Tanggal", "Kelas", "Jam Ke-", "Materi", "Kegiatan", "Hadir", "Tidak Hadir", "Nama Tidak Hadir", "Catatan"];
+            var rows = list.map(function(j, i){ return [i + 1, jrFmtTgl(j.tanggal), j.kelas || "-", kelasList(j.jam_ke).join(", ") || "-", j.materi || "-", j.kegiatan || "-", j.jml_hadir != null ? j.jml_hadir : "-", j.jml_tidak_hadir != null ? j.jml_tidak_hadir : jrArr(j.tidak_hadir).length, jrArr(j.tidak_hadir).join(", ") || "-", j.catatan || "-"]; });
             var judul = "JURNAL MENGAJAR — " + mapel.toUpperCase();
-            var isi = jrDokumenHtml(judul, "Kelas " + jrCState.kelas + " · " + jrFmtBulan(jrCState.bulan), [["Guru", guru], ["Mata Pelajaran", mapel], ["Kelas", jrCState.kelas], ["Periode", jrFmtBulan(jrCState.bulan)]], jrTabelHtml(headers, rows), guru);
-            body.innerHTML = '<div class="card"><div id="jrPrintArea"><div id="printArea">' + isi + '</div></div><div style="margin-top:14px" class="no-print"><button class="btn" id="jcUnduh">Unduh / Cetak</button></div></div>';
-            document.getElementById("jcUnduh").onclick = function(){ jrUnduhDokumen(judul + " — Kelas " + jrCState.kelas, "jurnal-mengajar-" + jrCState.kelas.toLowerCase() + "-" + jrCState.bulan, isi, headers, rows); };
+            var isi = jrDokumenHtml(judul, "Kelas " + jrCState.kelas + " · " + jrFmtBulan(jrCState.bulan), [["Guru", guru], ["Mata Pelajaran", mapel], ["Kelas", jrCState.kelas], ["Periode", jrFmtBulan(jrCState.bulan)]], jrTabelJurnalHtml(headers, rows), guru);
+            body.innerHTML = '<div class="card"><div id="jrPrintArea" class="jr-rekap-jurnal"><div id="printArea">' + isi + '</div></div><div style="margin-top:14px" class="no-print"><button class="btn" id="jcUnduh">Unduh / Cetak</button></div></div>';
+            document.getElementById("jcUnduh").onclick = function(){ jrUnduhDokumen(judul + " — Kelas " + jrCState.kelas, "jurnal-mengajar-" + jrCState.kelas.toLowerCase() + "-" + jrCState.bulan, isi, headers, rows, {jurnalLandscape: true}); };
           }).catch(function(e){ body.innerHTML = '<div class="card"><div class="empty">Gagal menyusun dokumen: ' + esc(e.message) + "</div></div>"; });
         } else if(jrCState.jenis === "presensi"){
           jrCall("jr_presensi_rekap", {bulan: jrCState.bulan, kelas: jrCState.kelas}).then(function(r){
