@@ -633,7 +633,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         {nisn:"0067651224", name:"Yoga Tri Hartanto", gender:"L", kelas:"9A", username:"siswa12"}
       ];
       var codeMap = {"Matematika":"MTK","IPA":"IPA","IPS":"IPS","Bahasa Indonesia":"BIN","Bahasa Inggris":"BIG","PPKn":"PKN","PAI":"PAI","Bahasa Jawa":"BJW","Seni Budaya":"SBD","PJOK":"PJK"};
-      var subjects = teachers.map(function(t){ return {code:codeMap[t.subject], name:t.subject, level:"7, 8, 9", teacher:t.name}; });
+      var subjects = [];
+      teachers.forEach(function(t){
+        String(t.subject || "").split(",").map(function(s){ return s.trim(); }).filter(function(s){ return s && s !== "-"; }).forEach(function(sub){
+          if(!subjects.some(function(x){ return x.name === sub; })) subjects.push({code:codeMap[sub], name:sub, level:"7, 8, 9", teacher:t.name});
+        });
+      });
 
       /* AKUN CONTOH MODE LOKAL (berlabel jelas di layar masuk): hanya
          untuk memudahkan ujicoba di perangkat ini. Pada mode terpusat,
@@ -1119,6 +1124,47 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       return defaultLogoSVG();
     }
     function mapelList(){ var set=[]; DB.subjects.forEach(function(s){ if(set.indexOf(s.name)<0) set.push(s.name); }); return set; }
+
+    /* ---- Satu guru boleh mengampu DUA mapel atau lebih ----
+       Daftar mapel seorang guru disimpan sebagai satu string gabungan
+       "Matematika, Informatika" pada kolom mapel yang sama (pola yang
+       sama dengan kelas tujuan multi-kelas), jadi TIDAK ada perubahan
+       skema di server maupun lokal. Data lama yang bermapel tunggal
+       terbaca apa adanya: mapel tunggal itu otomatis menjadi mapel
+       pertama guru tersebut — tidak ada data yang diubah, dipindah,
+       atau dihapus oleh fitur ini. Admin mengatur daftarnya lewat
+       formulir Tambah/Ubah Guru (centang lebih dari satu mapel). */
+    function parseMapelList(v){
+      return String(v == null ? "" : v).split(",").map(function(s){ return s.trim(); }).filter(function(s){ return s !== "" && s !== "-"; });
+    }
+    function daftarMapelGuru(t){ return parseMapelList(t ? t.subject : ""); }
+    function mapelUtamaGuru(t){ var l = daftarMapelGuru(t); return l.length ? l[0] : "-"; }
+    /* Semua nama mapel yang dikenal: dari daftar Mapel ditambah mapel
+       apa pun yang diampu guru (jaga-jaga belum tersinkron ke Mapel). */
+    function semuaMapel(){
+      var set = mapelList();
+      DB.teachers.forEach(function(t){ daftarMapelGuru(t).forEach(function(m){ if(set.indexOf(m) < 0) set.push(m); }); });
+      return set;
+    }
+    /* Pemilih mapel guru untuk formulir Admin: kotak centang berisi
+       semua mapel yang dikenal; mapel di luar daftar dapat ditambah
+       lewat isian teks di formulir yang memakai pemilih ini. */
+    function mapelPickerHtml(prefix, selected){
+      var sel = parseMapelList(selected);
+      var dikenal = semuaMapel();
+      sel.forEach(function(m){ if(dikenal.indexOf(m) < 0) dikenal.push(m); });
+      var h = '<div class="kelas-pick">';
+      dikenal.forEach(function(m){
+        h += '<label class="kelas-opt"><input type="checkbox" data-mpick="'+prefix+'" value="'+esc(m)+'"'+(sel.indexOf(m) >= 0 ? " checked" : "")+' /><span>'+esc(m)+'</span></label>';
+      });
+      return h + '</div>';
+    }
+    function mapelPickerValue(prefix, tambahan){
+      var vals = [];
+      Array.prototype.forEach.call(document.querySelectorAll('input[data-mpick="'+prefix+'"]:checked'), function(cb){ if(vals.indexOf(cb.value) < 0) vals.push(cb.value); });
+      parseMapelList(tambahan).forEach(function(m){ if(vals.indexOf(m) < 0) vals.push(m); });
+      return vals;
+    }
 
     function rataTugas(nisn, mapel){
       var vals = DB.submissions.filter(function(sb){
@@ -3102,10 +3148,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         + '<div class="table-wrap"><table><thead><tr><th>NIP</th><th>Nama Guru</th><th>Mata Pelajaran</th><th>No. Telepon/WA</th><th>Email</th><th>Aksi</th></tr></thead><tbody>'
         + (DB.teachers.length ? DB.teachers.map(function(t){
             return '<tr><td>'+esc(t.nip)+'</td><td><b>'+esc(t.name)+'</b></td><td>'+esc(t.subject)+'</td><td>'+esc(t.phone)+'</td><td>'+esc(t.email)+'</td>'
-              + '<td><button class="btn small danger" data-del-guru="'+esc(t.nip)+'">Hapus</button></td></tr>';
+              + '<td><button class="btn small ghost" data-edit-guru="'+esc(t.nip)+'">Ubah</button> <button class="btn small danger" data-del-guru="'+esc(t.nip)+'">Hapus</button></td></tr>';
           }).join("") : '<tr><td colspan="6"><div class="empty">Belum ada data guru.</div></td></tr>')
         + '</tbody></table></div>'
-        + '<p class="desc" style="color:var(--muted);font-size:.82rem;margin-top:10px">Format import: kolom <b>NIP, Nama Guru, Mata Pelajaran, No. Telepon/WA, Email</b> (file .xlsx atau .csv). Akun login guru dibuat otomatis dengan username guru1, guru2, … dan kata sandi awal acak yang ditampilkan serta dapat diunduh (daftar username &amp; kata sandi) setelah guru ditambahkan.</p>';
+        + '<p class="desc" style="color:var(--muted);font-size:.82rem;margin-top:10px">Satu guru boleh mengampu <b>dua mata pelajaran atau lebih</b> — atur lewat tombol <b>Ubah</b> pada baris guru (centang semua mapel yang diampu). Format import: kolom <b>NIP, Nama Guru, Mata Pelajaran, No. Telepon/WA, Email</b> (file .xlsx atau .csv); bila guru mengampu beberapa mapel, pisahkan dengan koma pada kolom Mata Pelajaran. Akun login guru dibuat otomatis dengan username guru1, guru2, … dan kata sandi awal acak yang ditampilkan serta dapat diunduh (daftar username &amp; kata sandi) setelah guru ditambahkan.</p>';
       document.getElementById("tplBtn").onclick = function(){ downloadTemplate("guru"); };
       document.getElementById("impBtn").onclick = function(){ document.getElementById("impFile").click(); };
       document.getElementById("impFile").addEventListener("change", function(e){
@@ -3131,6 +3177,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         });
       });
       document.getElementById("addBtn").onclick = function(){ formGuru(); };
+      Array.prototype.forEach.call(c.querySelectorAll("[data-edit-guru]"), function(b){
+        b.onclick = function(){
+          var t = teacherByNip(b.getAttribute("data-edit-guru"));
+          if(t) formGuru(t);
+        };
+      });
       Array.prototype.forEach.call(c.querySelectorAll("[data-del-guru]"), function(b){
         b.onclick = function(){
           var nip = b.getAttribute("data-del-guru");
@@ -3152,34 +3204,56 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         };
       });
     }
-    function formGuru(){
-      openModal('<h3>Tambah Guru Manual</h3><div class="sub">Akun login dibuat otomatis dengan kata sandi awal acak yang ditampilkan setelah disimpan.</div>'
-        + '<div class="field"><label>NIP</label><input id="fgNip" placeholder="18 digit NIP" /></div>'
-        + '<div class="field"><label>Nama Guru (dengan gelar)</label><input id="fgNama" placeholder="Contoh: Siti Rahayu, S.Pd." /></div>'
-        + '<div class="field"><label>Mata Pelajaran</label><input id="fgMapel" placeholder="Contoh: Matematika" /></div>'
-        + '<div class="grid2"><div class="field"><label>No. Telepon/WA</label><input id="fgTelp" placeholder="08xxxxxxxxxx" /></div>'
-        + '<div class="field"><label>Email</label><input id="fgEmail" placeholder="nama@sekolah.sch.id" /></div></div>'
-        + '<div class="foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" id="fgSave">Simpan Guru</button></div>');
+    function formGuru(existing){
+      var isEdit = !!existing;
+      var t = existing || {nip:"", name:"", subject:"", phone:"", email:""};
+      openModal('<h3>'+(isEdit ? "Ubah Data Guru" : "Tambah Guru Manual")+'</h3><div class="sub">'
+        + (isEdit ? "Perubahan hanya menimpa baris guru ini — akun login, jurnal, presensi, dan nilai guru tidak berubah. Mapel yang sudah tercentang adalah mapel yang diampu saat ini."
+                  : "Akun login dibuat otomatis dengan kata sandi awal acak yang ditampilkan setelah disimpan.")
+        + '</div>'
+        + '<div class="field"><label>NIP</label><input id="fgNip" placeholder="18 digit NIP" value="'+esc(t.nip)+'"'+(isEdit ? " readonly" : "")+' /></div>'
+        + '<div class="field"><label>Nama Guru (dengan gelar)</label><input id="fgNama" placeholder="Contoh: Siti Rahayu, S.Pd." value="'+esc(t.name)+'" /></div>'
+        + '<div class="field"><label>Mata Pelajaran yang Diampu — boleh lebih dari satu</label>'+mapelPickerHtml("fg", t.subject)
+        + '<div style="color:var(--muted);font-size:.8rem;margin-top:6px">Centang semua mata pelajaran yang diampu guru ini. Guru yang mengampu dua mapel atau lebih dapat berpindah mapel aktif di menu Mengajar dan pada form materi/tugas/kuis/asesmen.</div></div>'
+        + '<div class="field"><label>Mapel Lainnya (belum ada di daftar di atas)</label><input id="fgMapelBaru" placeholder="Contoh: Informatika — pisahkan dengan koma bila lebih dari satu" /></div>'
+        + '<div class="grid2"><div class="field"><label>No. Telepon/WA</label><input id="fgTelp" placeholder="08xxxxxxxxxx" value="'+esc(t.phone)+'" /></div>'
+        + '<div class="field"><label>Email</label><input id="fgEmail" placeholder="nama@sekolah.sch.id" value="'+esc(t.email)+'" /></div></div>'
+        + '<div class="foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" id="fgSave">'+(isEdit ? "Simpan Perubahan" : "Simpan Guru")+'</button></div>');
       document.getElementById("fgSave").onclick = function(){
         var nip = document.getElementById("fgNip").value.trim();
         var nama = document.getElementById("fgNama").value.trim();
-        var mapel = document.getElementById("fgMapel").value.trim();
-        if(!nip || !nama || !mapel){ toast("NIP, nama, dan mata pelajaran wajib diisi."); return; }
-        if(DB.teachers.some(function(t){return t.nip===nip;})){ toast("NIP sudah terdaftar."); return; }
+        var daftarMapel = mapelPickerValue("fg", document.getElementById("fgMapelBaru").value);
+        var mapel = daftarMapel.join(", ");
+        if(!nip || !nama || !daftarMapel.length){ toast("NIP, nama, dan minimal satu mata pelajaran wajib diisi."); return; }
+        var telp = document.getElementById("fgTelp").value.trim();
+        var email = document.getElementById("fgEmail").value.trim();
+        if(isEdit){
+          if(TERPUSAT()){
+            api("update", {sheet:"Guru", id:t._id, row:{nip:nip, nama:nama, mapel:mapel, telepon:telp, email:email}})
+              .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Gagal menyimpan perubahan guru ke server."); return loadAll(); })
+              .then(function(){ closeModal(); toast("Data guru diperbarui — kini mengampu: " + mapel + "."); gotoView("guru"); })
+              .catch(remoteFail);
+            return;
+          }
+          t.name = nama; t.subject = mapel; t.phone = telp; t.email = email;
+          save(); closeModal(); toast("Data guru diperbarui — kini mengampu: " + mapel + "."); gotoView("guru");
+          return;
+        }
+        if(DB.teachers.some(function(x){return x.nip===nip;})){ toast("NIP sudah terdaftar."); return; }
         if(TERPUSAT()){
           var gid = uid("G");
           var idxR = DB.users.filter(function(u){return u.role==="Guru";}).length + 1;
           while(userByUsername("guru"+idxR)) idxR++;
           var unR = "guru"+idxR;
           var pwR = kataSandiAwalAcak();
-          api("create", {sheet:"Guru", row:{id:gid, nip:nip, nama:nama, mapel:mapel, telepon:document.getElementById("fgTelp").value.trim(), email:document.getElementById("fgEmail").value.trim()}})
+          api("create", {sheet:"Guru", row:{id:gid, nip:nip, nama:nama, mapel:mapel, telepon:telp, email:email}})
             .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Gagal menyimpan data guru ke server."); return api("register_user", {user:{username:unR, nama:nama, peran:"guru", password:pwR, ref_id:gid}}); })
             .then(function(r){ if(!r || !r.ok) throw new Error((r && r.error) || "Data guru tersimpan, tetapi akun login gagal dibuat."); return loadAll(); })
             .then(function(){ closeModal(); gotoView("guru"); tampilAkunBaru("Guru", unR, pwR); })
             .catch(remoteFail);
           return;
         }
-        DB.teachers.push({nip:nip, name:nama, subject:mapel, phone:document.getElementById("fgTelp").value.trim(), email:document.getElementById("fgEmail").value.trim()});
+        DB.teachers.push({nip:nip, name:nama, subject:mapel, phone:telp, email:email});
         var idx = DB.users.filter(function(u){return u.role==="Guru";}).length + 1;
         while(userByUsername("guru"+idx)) idx++;
         var pwL = kataSandiAwalAcak();
@@ -3191,7 +3265,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     /* ---- Admin: Data Siswa ---- */
     var siswaFilter = "Semua";
     function viewAdminSiswa(c){
-      var list = DB.students.filter(function(s){ return siswaFilter==="Semua" || s.kelas===siswaFilter; });
+      /* Urutan tampil saja: per kelas, nama siswa sesuai abjad. Data
+         tersimpan tidak diurutkan ulang dan tidak diubah. */
+      var list = DB.students.filter(function(s){ return siswaFilter==="Semua" || s.kelas===siswaFilter; }).slice()
+        .sort(function(a, b){
+          var ka = KELAS_LIST.indexOf(a.kelas), kb = KELAS_LIST.indexOf(b.kelas);
+          if(ka !== kb) return ka - kb;
+          return a.name.localeCompare(b.name, "id");
+        });
       var opts = ["Semua"].concat(KELAS_LIST).map(function(k){
         return '<option value="'+k+'"'+(siswaFilter===k?" selected":"")+'>'+(k==="Semua"?"Semua Kelas":"Kelas "+k)+'</option>';
       }).join("");
@@ -3308,7 +3389,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function syncMapel(){
       var codeMap = {"Matematika":"MTK","IPA":"IPA","IPS":"IPS","Bahasa Indonesia":"BIN","Bahasa Inggris":"BIG","PPKn":"PKN","PAI":"PAI","Bahasa Jawa":"BJW","Seni Budaya":"SBD","PJOK":"PJK"};
       var bySubject = {};
-      DB.teachers.forEach(function(t){ if(t.subject && t.subject!=="-") bySubject[t.subject] = t.name; });
+      DB.teachers.forEach(function(t){ daftarMapelGuru(t).forEach(function(sub){ if(!bySubject[sub]) bySubject[sub] = t.name; }); });
       var old = {};
       DB.subjects.forEach(function(s){ old[s.name] = s; });
       var next = Object.keys(bySubject).map(function(sub){
@@ -3336,10 +3417,12 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           DB.subjects.forEach(function(s){ sudah[s.name] = true; });
           var chainM = Promise.resolve(), nBaru = 0;
           DB.teachers.forEach(function(t){
-            if(!t.subject || t.subject === "-" || sudah[t.subject]) return;
-            sudah[t.subject] = true; nBaru++;
-            var rowM = {id:uid("M"), kode:(codeMapS[t.subject] || t.subject.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "MPL"), nama:t.subject, tingkat:"7, 8, 9", guru_id:t._id, guru_nama:t.name};
-            chainM = chainM.then(function(){ return api("create", {sheet:"Mapel", row:rowM}); });
+            daftarMapelGuru(t).forEach(function(sub){
+              if(sudah[sub]) return;
+              sudah[sub] = true; nBaru++;
+              var rowM = {id:uid("M"), kode:(codeMapS[sub] || sub.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase() || "MPL"), nama:sub, tingkat:"7, 8, 9", guru_id:t._id, guru_nama:t.name};
+              chainM = chainM.then(function(){ return api("create", {sheet:"Mapel", row:rowM}); });
+            });
           });
           chainM.then(function(){ return loadAll(); })
             .then(function(){ toast(nBaru ? nBaru + " mata pelajaran ditambahkan dari data guru." : "Semua mata pelajaran guru sudah terdaftar."); gotoView("mapel"); })
@@ -3417,6 +3500,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     function rekapTableFromRows(rowsAll, kelas, mapelFilter){
       var rows = mapelFilter ? rowsAll.filter(function(r){ return r.mapel === mapelFilter; }) : rowsAll;
+      /* Nama siswa tampil sesuai abjad (urutan tampil saja; pengurutan
+         stabil menjaga baris-baris satu siswa tetap berurutan). */
+      rows = rows.slice().sort(function(a, b){ return String(a.name).localeCompare(String(b.name), "id"); });
       if(!rows.length) return '<div class="card"><div class="empty">Belum ada data nilai untuk kelas '+esc(kelas)+(mapelFilter ? " pada mapel "+esc(mapelFilter) : "")+'. Nilai muncul setelah tugas dinilai dan asesmen dikerjakan.</div></div>';
       return '<div class="table-wrap"><table><thead><tr><th>NISN</th><th>Nama</th><th>Kelas</th><th>Mapel</th><th>Rata-rata Tugas</th><th>Asesmen</th><th>Nilai Akhir</th><th>Predikat</th><th>Keterangan</th></tr></thead><tbody>'
         + rows.map(function(r){
@@ -3921,7 +4007,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       return KELAS_LIST.map(function(k){ return '<option value="'+k+'"'+(sel===k?" selected":"")+'>Kelas '+k+'</option>'; }).join("");
     }
     function mapelOptions(sel){
-      return mapelList().map(function(m){ return '<option value="'+esc(m)+'"'+(sel===m?" selected":"")+'>'+esc(m)+'</option>'; }).join("");
+      return semuaMapel().map(function(m){ return '<option value="'+esc(m)+'"'+(sel===m?" selected":"")+'>'+esc(m)+'</option>'; }).join("");
     }
     /* ---- Kelas tujuan bisa lebih dari satu (multi-kelas) ----
        Nilai kelas pada Materi/Tugas/Kuis/Asesmen disimpan sebagai satu
@@ -4005,7 +4091,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     function formMateri(m){
       var me = myTeacher();
-      var isEdit = !!m; m = m || {title:"", desc:"", link:"", bab:"", links:[], mapel:me.subject, kelas:"7A"};
+      var isEdit = !!m; m = m || {title:"", desc:"", link:"", bab:"", links:[], mapel:mapelUtamaGuru(me), kelas:"7A"};
       openModal('<h3>'+(isEdit?"Edit Materi":"Tambah Materi")+'</h3><div class="sub">Materi akan tampil di menu Materi siswa pada kelas-kelas tujuan yang dipilih, terkumpul di dalam babnya.</div>'
         + '<div class="field"><label>Judul Materi</label><input id="fmJudul" value="'+esc(m.title)+'" placeholder="Contoh: Bilangan Berpangkat" /></div>'
         + '<div class="field"><label>Bab</label><input id="fmBab" list="fmBabList" value="'+esc(m.bab || "")+'" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("fm", m.mapel)
@@ -4088,11 +4174,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       var me = myTeacher();
       openModal('<h3>Buat Tugas Baru</h3><div class="sub">Tugas langsung tampil di menu Tugas siswa pada kelas-kelas tujuan yang dipilih, terkumpul di dalam babnya.</div>'
         + '<div class="field"><label>Judul Tugas</label><input id="ftJudul" placeholder="Contoh: Latihan Bab 2" /></div>'
-        + '<div class="field"><label>Bab</label><input id="ftBab" list="ftBabList" value="" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("ft", me.subject)
+        + '<div class="field"><label>Bab</label><input id="ftBab" list="ftBabList" value="" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("ft", mapelUtamaGuru(me))
         + '<div style="color:var(--muted);font-size:.8rem;margin-top:4px">Pilih saran yang muncul agar ejaan bab sama dengan konten lain pada mapel ini, atau ketik nama bab baru. Boleh dikosongkan — tugas masuk kelompok "Tanpa Bab".</div></div>'
         + '<div class="field"><label>Deskripsi / Instruksi</label><textarea id="ftDesc" rows="3" placeholder="Jelaskan instruksi pengerjaan…"></textarea></div>'
         + '<div class="field"><label>Link Eksternal (opsional)</label><input id="ftLink" type="url" placeholder="https://… — contoh: Google Form, Quizizz, Wordwall" /><div style="color:var(--muted);font-size:.8rem;margin-top:4px">Diisi bila tugas dikerjakan lewat layanan lain. Tautan akan tampil sebagai tombol di halaman tugas siswa.</div></div>'
-        + '<div class="field"><label>Mata Pelajaran</label><select id="ftMapel">'+mapelOptions(me.subject)+'</select></div>'
+        + '<div class="field"><label>Mata Pelajaran</label><select id="ftMapel">'+mapelOptions(mapelUtamaGuru(me))+'</select></div>'
         + '<div class="field"><label>Kelas Tujuan — boleh lebih dari satu</label>'+kelasPickerHtml("ftKelas", "7A")+'</div>'
         + '<div class="field"><label>Batas Pengumpulan (Deadline)</label><input id="ftDeadline" type="date" /></div>'
         + '<div class="foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" id="ftSave">Simpan Tugas</button></div>');
@@ -4121,10 +4207,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     function detailTugas(tugasId){
       var t = DB.tugas.find(function(x){return x.id===tugasId;}); if(!t) return;
-      var subs = DB.submissions.filter(function(s){return s.tugasId===tugasId;});
+      var subs = DB.submissions.filter(function(s){return s.tugasId===tugasId;}).slice()
+        .sort(function(a, b){ var sa = studentByNisn(a.nisn), sb = studentByNisn(b.nisn); return String(sa ? sa.name : a.nisn).localeCompare(String(sb ? sb.name : b.nisn), "id"); });
       var belumKumpul = DB.students.filter(function(s){
         return kelasMasuk(t, s.kelas) && !subs.some(function(x){return x.nisn===s.nisn;});
-      });
+      }).sort(function(a, b){ return a.name.localeCompare(b.name, "id"); });
       var rows = subs.map(function(s){
         var st = studentByNisn(s.nisn);
         return '<tr><td><b>'+esc(st?st.name:s.nisn)+'</b><div style="color:var(--muted);font-size:.8rem;max-width:340px;margin-top:4px">'+esc(s.answer)+'</div></td>'
@@ -4165,7 +4252,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           '<button class="btn" id="addBtn">+ Buat Kuis</button>')
         + (list.length ? groups.map(function(g){
             return babHeadHtml(g, "kuis") + '<div class="item-list">' + g.items.map(function(k){
-            var hasil = DB.kuisResults.filter(function(r){return r.kuisId===k.id;});
+            var hasil = DB.kuisResults.filter(function(r){return r.kuisId===k.id;}).slice()
+            .sort(function(a, b){ var sa = studentByNisn(a.nisn), sb = studentByNisn(b.nisn); return String(sa ? sa.name : a.nisn).localeCompare(String(sb ? sb.name : b.nisn), "id"); });
             var rata = hasil.length ? Math.round(hasil.reduce(function(a,b){return a+b.score;},0)/hasil.length) : null;
             return '<div class="item"><div class="top"><div><h3>'+esc(k.title)+'</h3><div class="meta"><span class="pill">'+esc(k.mapel)+'</span> <span class="pill">Kelas '+esc(kelasTampil(k.kelas))+'</span> <span class="pill">'+k.questions.length+' soal</span> <span class="pill">'+hasil.length+' siswa mengerjakan'+(rata!==null ? " · rata-rata "+rata : "")+'</span></div></div>'
               + '<div class="acts"><button class="btn small" data-hasil-kuis="'+k.id+'">Lihat Hasil Siswa</button><button class="btn small danger" data-del-kuis="'+k.id+'">Hapus</button></div></div>' + extLinkHtml(k.link, "Buka Tautan Kuis") + '</div>';
@@ -4199,7 +4287,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       Array.prototype.forEach.call(c.querySelectorAll("[data-hasil-kuis]"), function(b){
         b.onclick = function(){
           var k = DB.kuis.find(function(x){return x.id===b.getAttribute("data-hasil-kuis");}); if(!k) return;
-          var hasil = DB.kuisResults.filter(function(r){return r.kuisId===k.id;});
+          var hasil = DB.kuisResults.filter(function(r){return r.kuisId===k.id;}).slice()
+            .sort(function(a, b){ var sa = studentByNisn(a.nisn), sb = studentByNisn(b.nisn); return String(sa ? sa.name : a.nisn).localeCompare(String(sb ? sb.name : b.nisn), "id"); });
           openModal('<h3>Hasil: '+esc(k.title)+'</h3><div class="sub">'+hasil.length+' siswa kelas '+esc(kelasTampil(k.kelas))+' telah mengerjakan.</div>'
             + (hasil.length ? '<div class="table-wrap"><table style="min-width:0"><thead><tr><th>NISN</th><th>Nama Siswa</th><th>Skor</th></tr></thead><tbody>'
                 + hasil.map(function(r){ var st = studentByNisn(r.nisn); return '<tr><td>'+esc(r.nisn)+'</td><td><b>'+esc(st?st.name:"-")+'</b></td><td><span class="badge '+(r.score>=75?"b-ok":"b-warn")+'">'+r.score+'</span></td></tr>'; }).join("")
@@ -4212,9 +4301,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       var me = myTeacher();
       openModal('<h3>Buat Kuis Pilihan Ganda</h3><div class="sub">Tulis soal, empat opsi jawaban, dan tentukan kunci jawabannya — atau cukup isi link eksternal bila kuis dikerjakan di layanan lain (mis. Quizizz). Kuis terkumpul di dalam babnya.</div>'
         + '<div class="field"><label>Judul Kuis</label><input id="fkJudul" placeholder="Contoh: Kuis Bab 1 — Bilangan" /></div>'
-        + '<div class="field"><label>Bab</label><input id="fkBab" list="fkBabList" value="" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("fk", me.subject)
+        + '<div class="field"><label>Bab</label><input id="fkBab" list="fkBabList" value="" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("fk", mapelUtamaGuru(me))
         + '<div style="color:var(--muted);font-size:.8rem;margin-top:4px">Pilih saran yang muncul agar ejaan bab sama dengan konten lain pada mapel ini, atau ketik nama bab baru. Boleh dikosongkan — kuis masuk kelompok "Tanpa Bab".</div></div>'
-        + '<div class="field"><label>Mata Pelajaran</label><select id="fkMapel">'+mapelOptions(me.subject)+'</select></div>'
+        + '<div class="field"><label>Mata Pelajaran</label><select id="fkMapel">'+mapelOptions(mapelUtamaGuru(me))+'</select></div>'
         + '<div class="field"><label>Kelas Tujuan — boleh lebih dari satu</label>'+kelasPickerHtml("fkKelas", "7A")+'</div>'
         + '<div class="field"><label>Link Eksternal (opsional)</label><input id="fkLink" type="url" placeholder="https://… — contoh: Quizizz, Google Form, Wordwall" /><div style="color:var(--muted);font-size:.8rem;margin-top:4px">Bila diisi, siswa dapat membuka tautan ini dari halaman kuis. Soal di bawah boleh dikosongkan bila seluruh kuis dikerjakan lewat tautan tersebut.</div></div>'
         + '<div id="fkSoal"></div>'
@@ -4323,11 +4412,11 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       var me = myTeacher();
       openModal('<h3>Buat Asesmen Baru</h3><div class="sub">Satu soal uraian per baris pada kolom soal. Asesmen terkumpul di dalam babnya.</div>'
         + '<div class="field"><label>Judul Asesmen</label><input id="faJudul" placeholder="Contoh: Asesmen Tengah Semester" /></div>'
-        + '<div class="field"><label>Bab</label><input id="faBab" list="faBabList" value="" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("fa", me.subject)
+        + '<div class="field"><label>Bab</label><input id="faBab" list="faBabList" value="" placeholder="Contoh: Bab 1 — Bilangan Berpangkat dan Bentuk Akar" autocomplete="off" />'+babDatalistHtml("fa", mapelUtamaGuru(me))
         + '<div style="color:var(--muted);font-size:.8rem;margin-top:4px">Pilih saran yang muncul agar ejaan bab sama dengan konten lain pada mapel ini, atau ketik nama bab baru. Boleh dikosongkan — asesmen masuk kelompok "Tanpa Bab".</div></div>'
         + '<div class="field"><label>Deskripsi / Petunjuk</label><textarea id="faDesc" rows="2" placeholder="Petunjuk pengerjaan…"></textarea></div>'
         + '<div class="field"><label>Link Eksternal (opsional)</label><input id="faLink" type="url" placeholder="https://… — contoh: Google Form, Quizizz, Wordwall" /><div style="color:var(--muted);font-size:.8rem;margin-top:4px">Diisi bila asesmen dikerjakan lewat layanan lain. Tautan tampil sebagai tombol di halaman asesmen siswa; soal uraian di bawah boleh dikosongkan bila seluruh asesmen lewat tautan tersebut.</div></div>'
-        + '<div class="field"><label>Mata Pelajaran</label><select id="faMapel">'+mapelOptions(me.subject)+'</select></div>'
+        + '<div class="field"><label>Mata Pelajaran</label><select id="faMapel">'+mapelOptions(mapelUtamaGuru(me))+'</select></div>'
         + '<div class="field"><label>Kelas Tujuan — boleh lebih dari satu</label>'+kelasPickerHtml("faKelas", "7A")+'</div>'
         + '<div class="field"><label>Soal Uraian (satu soal per baris)</label><textarea id="faSoal" rows="4" placeholder="Soal pertama…&#10;Soal kedua…"></textarea></div>'
         + '<div class="foot"><button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn" id="faSave">Simpan Asesmen</button></div>');
@@ -4361,7 +4450,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     function detailAsesmen(asesmenId){
       var a = DB.asesmen.find(function(x){return x.id===asesmenId;}); if(!a) return;
-      var hasil = DB.asesmenResults.filter(function(r){return r.asesmenId===asesmenId;});
+      var hasil = DB.asesmenResults.filter(function(r){return r.asesmenId===asesmenId;}).slice()
+        .sort(function(a, b){ var sa = studentByNisn(a.nisn), sb = studentByNisn(b.nisn); return String(sa ? sa.name : a.nisn).localeCompare(String(sb ? sb.name : b.nisn), "id"); });
       var rows = hasil.map(function(r){
         var st = studentByNisn(r.nisn);
         var jawaban = r.answers.map(function(ans,i){ return '<div style="margin-top:4px"><b>Soal '+(i+1)+':</b> '+esc(ans)+'</div>'; }).join("");
@@ -4394,29 +4484,50 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
     /* ---- Guru: Nilai ---- */
     var guruNilaiKelas = "7A";
+    var guruNilaiMapel = "";
+    /* Mapel yang sedang dilihat guru pada Rekap/Laporan: bila guru
+       mengampu lebih dari satu mapel, tampil pemilih mapel; pilihan
+       terakhir dipakai lagi selama aplikasi terbuka. */
+    function mapelAktifGuru(me, tersimpan){
+      var daftar = daftarMapelGuru(me);
+      if(!daftar.length) return me.subject || "-";
+      if(tersimpan && daftar.indexOf(tersimpan) >= 0) return tersimpan;
+      return daftar[0];
+    }
+    function pemilihMapelGuruHtml(idSel, me, aktif){
+      var daftar = daftarMapelGuru(me);
+      if(daftar.length < 2) return "";
+      return '<div class="field"><label style="font-size:.78rem;font-weight:700;color:var(--muted)">Mata Pelajaran</label><select id="'+idSel+'">'
+        + daftar.map(function(m){ return '<option value="'+esc(m)+'"'+(aktif===m?" selected":"")+'>'+esc(m)+'</option>'; }).join("") + '</select></div>';
+    }
     function viewGuruNilai(c){
       var me = myTeacher();
+      var mapelAktif = mapelAktifGuru(me, guruNilaiMapel);
       var opts = KELAS_LIST.map(function(k){ return '<option value="'+k+'"'+(guruNilaiKelas===k?" selected":"")+'>Kelas '+k+'</option>'; }).join("");
-      c.innerHTML = pageHead("Rekap Nilai — " + me.subject, "Nilai siswa untuk mata pelajaran Anda, dihitung otomatis (60% tugas + 40% asesmen).",
+      c.innerHTML = pageHead("Rekap Nilai — " + mapelAktif, "Nilai siswa untuk mata pelajaran Anda, dihitung otomatis (60% tugas + 40% asesmen).",
           '<button class="btn" id="printBtn">Unduh Rekap</button>')
-        + '<div class="toolbar no-print"><div class="field"><label style="font-size:.78rem;font-weight:700;color:var(--muted)">Pilih Kelas</label><select id="gnKelas">'+opts+'</select></div></div>'
-        + '<div id="printArea">' + kopImgHtml() + '<h3 style="margin-bottom:10px">Rekap Nilai '+esc(me.subject)+' — Kelas '+esc(guruNilaiKelas)+'</h3>'
-        + (TERPUSAT() ? '<div id="rekapSlot"><div class="card"><div class="empty">Memuat data nilai dari server…</div></div></div>' : rekapTableHtml(guruNilaiKelas, me.subject)) + '</div>';
+        + '<div class="toolbar no-print"><div class="field"><label style="font-size:.78rem;font-weight:700;color:var(--muted)">Pilih Kelas</label><select id="gnKelas">'+opts+'</select></div>'
+        + pemilihMapelGuruHtml("gnMapel", me, mapelAktif) + '</div>'
+        + '<div id="printArea">' + kopImgHtml() + '<h3 style="margin-bottom:10px">Rekap Nilai '+esc(mapelAktif)+' — Kelas '+esc(guruNilaiKelas)+'</h3>'
+        + (TERPUSAT() ? '<div id="rekapSlot"><div class="card"><div class="empty">Memuat data nilai dari server…</div></div></div>' : rekapTableHtml(guruNilaiKelas, mapelAktif)) + '</div>';
       if(TERPUSAT()){
         rekapRemoteRows(guruNilaiKelas).then(function(rows){
           var el = document.getElementById("rekapSlot");
-          if(el) el.innerHTML = rekapTableFromRows(rows, guruNilaiKelas, me.subject);
+          if(el) el.innerHTML = rekapTableFromRows(rows, guruNilaiKelas, mapelAktif);
         }).catch(function(e){
           var el = document.getElementById("rekapSlot");
           if(el) el.innerHTML = '<div class="card"><div class="empty">Gagal memuat rekap dari server: ' + esc(e.message) + '</div></div>';
         });
       }
       document.getElementById("gnKelas").onchange = function(e){ guruNilaiKelas = e.target.value; gotoView("g-nilai"); };
-      document.getElementById("printBtn").onclick = function(){ unduhLaporan("Rekap Nilai " + me.subject + " — Kelas " + guruNilaiKelas, "rekap-nilai-" + slugFile(me.subject) + "-kelas-" + guruNilaiKelas.toLowerCase()); };
+      var gnMapelEl = document.getElementById("gnMapel");
+      if(gnMapelEl) gnMapelEl.onchange = function(e){ guruNilaiMapel = e.target.value; gotoView("g-nilai"); };
+      document.getElementById("printBtn").onclick = function(){ unduhLaporan("Rekap Nilai " + mapelAktif + " — Kelas " + guruNilaiKelas, "rekap-nilai-" + slugFile(mapelAktif) + "-kelas-" + guruNilaiKelas.toLowerCase()); };
     }
 
     /* ---- Guru: Laporan Nilai per Kelas (Mapel Sendiri) ---- */
     var lapGuruKelas = "7A";
+    var lapGuruMapel = "";
     function guruLaporanBodyHtml(students, nilaiFn){
       if(!students.length){
         return '<div class="card"><div class="empty">Belum ada siswa terdaftar di kelas '+esc(lapGuruKelas)+'.</div></div>';
@@ -4447,14 +4558,16 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     }
     function viewGuruLaporan(c){
       var me = myTeacher();
+      var mapelAktif = mapelAktifGuru(me, lapGuruMapel);
       var opts = KELAS_LIST.map(function(k){ return '<option value="'+k+'"'+(lapGuruKelas===k?" selected":"")+'>Kelas '+k+'</option>'; }).join("");
       var students = DB.students.filter(function(s){ return s.kelas===lapGuruKelas; }).slice()
         .sort(function(a,b){ return a.name.localeCompare(b.name, "id"); });
-      var bodyHtml = TERPUSAT() ? null : guruLaporanBodyHtml(students, function(nisn){ return nilaiSiswaMapel(nisn, me.subject); });
-      c.innerHTML = pageHead("Laporan Nilai — " + me.subject, "Laporan nilai per kelas khusus untuk mata pelajaran yang Anda ampu, siap diunduh.",
+      var bodyHtml = TERPUSAT() ? null : guruLaporanBodyHtml(students, function(nisn){ return nilaiSiswaMapel(nisn, mapelAktif); });
+      c.innerHTML = pageHead("Laporan Nilai — " + mapelAktif, "Laporan nilai per kelas khusus untuk mata pelajaran yang Anda ampu, siap diunduh.",
           '<button class="btn" id="printBtn">Unduh Laporan</button>')
-        + '<div class="toolbar no-print"><div class="field"><label style="font-size:.78rem;font-weight:700;color:var(--muted)">Pilih Kelas</label><select id="lapGuruKelasSel">'+opts+'</select></div></div>'
-        + '<div id="printArea">' + kopImgHtml() + '<div style="text-align:center;margin-bottom:14px"><h3 style="font-size:1.08rem">LAPORAN NILAI MATA PELAJARAN '+esc(me.subject.toUpperCase())+'</h3>'
+        + '<div class="toolbar no-print"><div class="field"><label style="font-size:.78rem;font-weight:700;color:var(--muted)">Pilih Kelas</label><select id="lapGuruKelasSel">'+opts+'</select></div>'
+        + pemilihMapelGuruHtml("lapGuruMapelSel", me, mapelAktif) + '</div>'
+        + '<div id="printArea">' + kopImgHtml() + '<div style="text-align:center;margin-bottom:14px"><h3 style="font-size:1.08rem">LAPORAN NILAI MATA PELAJARAN '+esc(mapelAktif.toUpperCase())+'</h3>'
         + '<p style="margin:2px 0 0;color:var(--muted);font-size:.88rem">SMP Negeri 1 Wonosari · Kelas '+esc(lapGuruKelas)+' · Guru: '+esc(me.name)+'</p></div>'
         + (TERPUSAT() ? '<div id="lapSlot"><div class="card"><div class="empty">Memuat data nilai dari server…</div></div></div>' : bodyHtml)
         + tandaTanganHtml("Guru Mata Pelajaran", me.name)
@@ -4464,7 +4577,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           var el = document.getElementById("lapSlot");
           if(!el) return;
           el.innerHTML = guruLaporanBodyHtml(students, function(nisn){
-            var r = rows.find(function(x){ return x.nisn === nisn && x.mapel === me.subject; });
+            var r = rows.find(function(x){ return x.nisn === nisn && x.mapel === mapelAktif; });
             return r ? {rt:r.rt, asesmen:r.asesmen, akhir:r.akhir} : {rt:null, asesmen:null, akhir:null};
           });
         }).catch(function(e){
@@ -4473,7 +4586,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         });
       }
       document.getElementById("lapGuruKelasSel").onchange = function(e){ lapGuruKelas = e.target.value; gotoView("g-laporan"); };
-      document.getElementById("printBtn").onclick = function(){ unduhLaporan("Laporan Nilai " + me.subject + " — Kelas " + lapGuruKelas + " — SMP Negeri 1 Wonosari", "laporan-nilai-" + slugFile(me.subject) + "-kelas-" + lapGuruKelas.toLowerCase()); };
+      var lapMapelEl = document.getElementById("lapGuruMapelSel");
+      if(lapMapelEl) lapMapelEl.onchange = function(e){ lapGuruMapel = e.target.value; gotoView("g-laporan"); };
+      document.getElementById("printBtn").onclick = function(){ unduhLaporan("Laporan Nilai " + mapelAktif + " — Kelas " + lapGuruKelas + " — SMP Negeri 1 Wonosari", "laporan-nilai-" + slugFile(mapelAktif) + "-kelas-" + lapGuruKelas.toLowerCase()); };
     }
 
     /* ================= DASHBOARD SISWA ================= */
@@ -4823,15 +4938,51 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       try { return new Date(String(b).slice(0, 7) + "-01T00:00:00").toLocaleDateString("id-ID", {month:"long", year:"numeric"}); }
       catch(e){ return String(b); }
     }
-    function jrMapelSaya(){
+    /* Mapel aktif menu Mengajar: guru yang diampu satu mapel selalu
+       memakai mapel itu (perilaku lama, datanya tidak berubah). Guru
+       yang mengampu dua mapel atau lebih mendapat pemilih "Mata
+       Pelajaran Aktif" di keempat halaman Mengajar; jurnal yang ditulis
+       tercatat dengan mapel yang sedang aktif/terpilih. */
+    var jrMapelAktif = "";
+    function jrDaftarMapelSaya(){
       var t = (typeof myTeacher === "function") ? myTeacher() : null;
-      if(t && t.subject && t.subject !== "-") return t.subject;
-      return (session && session.mapel) ? session.mapel : "";
+      var l = daftarMapelGuru(t);
+      if(!l.length && session && session.mapel) l = parseMapelList(session.mapel);
+      return l;
+    }
+    function jrMapelSaya(){
+      var l = jrDaftarMapelSaya();
+      if(!l.length) return (session && session.mapel) ? session.mapel : "";
+      if(jrMapelAktif && l.indexOf(jrMapelAktif) >= 0) return jrMapelAktif;
+      return l[0];
+    }
+    function jrPilihMapelHtml(){
+      var l = jrDaftarMapelSaya();
+      if(l.length < 2) return "";
+      return '<div class="card no-print"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
+        + '<div class="field" style="margin:0"><label for="jrPilihMapel">Mata Pelajaran Aktif</label><select id="jrPilihMapel">'
+        + l.map(function(m){ return '<option value="'+esc(m)+'"'+(jrMapelSaya()===m ? " selected" : "")+'>'+esc(m)+'</option>'; }).join("")
+        + '</select></div>'
+        + '<p class="desc" style="margin:0">Anda mengampu '+l.length+' mata pelajaran. Jurnal, presensi, daftar nilai, dan dokumen cetak mengikuti mapel aktif ini.</p>'
+        + '</div></div>';
+    }
+    function ikatJrPilihMapel(viewKey){
+      var sel = document.getElementById("jrPilihMapel");
+      if(sel) sel.onchange = function(){ jrMapelAktif = sel.value; gotoView(viewKey); };
+    }
+    /* Saring daftar jurnal ke mapel aktif bila guru bermapel ganda.
+       Jurnal lama yang mapelnya kosong atau di luar daftar mapel guru
+       (data sebelum fitur ini) tetap ditampilkan — tidak disembunyikan. */
+    function jrSaringMapel(list){
+      var l = jrDaftarMapelSaya();
+      if(l.length < 2) return list;
+      var aktif = jrMapelSaya();
+      return list.filter(function(j){ return !j.mapel || l.indexOf(j.mapel) < 0 || j.mapel === aktif; });
     }
     function jrNamaSaya(){ return session ? session.name : ""; }
     function jrUserSaya(){ return session ? session.username : ""; }
     function jrRoster(kelas){
-      return DB.students.filter(function(s){ return s.kelas === kelas; }).slice().sort(function(a, b){ return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+      return DB.students.filter(function(s){ return s.kelas === kelas; }).slice().sort(function(a, b){ return a.name.localeCompare(b.name, "id"); });
     }
     function jrNamaKunci(s){ return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
 
@@ -4914,7 +5065,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if(action === "jr_jurnal_save"){
         var j = p.jurnal || {};
         return jrApi("jr_jurnal_save", {jurnal: {id: j.id || "", tanggal: j.tanggal, kelas: j.kelas,
-            jam_ke: j.jam_ke || "", materi: j.materi, kegiatan: j.kegiatan || "", catatan: j.catatan || "",
+            jam_ke: j.jam_ke || "", mapel: j.mapel || jrMapelSaya(), materi: j.materi, kegiatan: j.kegiatan || "", catatan: j.catatan || "",
             tidak_hadir: jrArr(j.tidak_hadir)}}).then(function(r){
           var hasil = r.data ? jrPetakanJurnal(r.data) : j;
           hasil.kegiatan = j.kegiatan || ""; hasil.catatan = j.catatan || "";
@@ -4974,9 +5125,15 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         });
       }
       if(action === "jr_nilai_get"){
-        return Promise.all([jrApi("jr_nilai_get", {kelas: p.kelas}), jrApi("jr_kolom_get", {})]).then(function(rs){
+        return Promise.all([jrApi("jr_nilai_get", {kelas: p.kelas, mapel: p.mapel || ""}), jrApi("jr_kolom_get", {})]).then(function(rs){
+          /* Nilai dipisah per mapel: baris yang membawa cap mapel dari
+             server disaring ke mapel aktif; baris lama tanpa cap mapel
+             (data sebelum fitur ini) tetap tampil apa adanya. */
+          var aktifR = p.mapel || "";
+          var rowsR = jrArr(rs[0].data).map(function(n){ return {nis: String(n.nisn || ""), kolom: n.kolom, nilai: n.nilai, mapel: n.mapel || ""}; });
+          if(aktifR && rowsR.some(function(n){ return !!n.mapel; })) rowsR = rowsR.filter(function(n){ return !n.mapel || n.mapel === aktifR; });
           return {ok:true,
-            nilai: jrArr(rs[0].data).map(function(n){ return {nis: String(n.nisn || ""), kolom: n.kolom, nilai: n.nilai}; }),
+            nilai: rowsR,
             kolom: Object.assign(jrCfgDariServer(rs[1].data, rs[0].kkm), {kelas: p.kelas})};
         });
       }
@@ -4997,7 +5154,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var urutan = Promise.resolve({ok:true});
         for(var i = 0; i < items.length; i += 40){
           (function(potong){
-            urutan = urutan.then(function(){ return jrApi("jr_nilai_save", {kelas: p.kelas, items: potong}); });
+            urutan = urutan.then(function(){ return jrApi("jr_nilai_save", {kelas: p.kelas, mapel: p.mapel || "", items: potong}); });
           })(items.slice(i, i + 40));
         }
         return urutan.then(function(){ return {ok:true}; });
@@ -5061,7 +5218,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       if(action === "jr_jurnal_save"){
         var j = Object.assign({}, p.jurnal || {});
         if(!isAdmin && j.username && j.username !== me) return {ok:false, error:"Jurnal guru lain tidak dapat diubah."};
-        j.username = me; j.nama = jrNamaSaya(); j.mapel = jrMapelSaya();
+        j.username = me; j.nama = jrNamaSaya();
+        var daftarJ = jrDaftarMapelSaya();
+        j.mapel = (j.mapel && daftarJ.indexOf(j.mapel) >= 0) ? j.mapel : jrMapelSaya();
         j.tidak_hadir = jrArr(j.tidak_hadir).map(function(x){ return String(x); });
         j.jml_tidak_hadir = j.tidak_hadir.length;
         var roster = jrRoster(j.kelas);
@@ -5118,37 +5277,57 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         });
         return {ok:true, sesi: sesi, ringkas: Object.keys(ringkasMap).map(function(k){ return ringkasMap[k]; })};
       }
+      /* Buku nilai & pengaturan kolom dipisah PER MAPEL: guru yang
+         mengampu dua mapel atau lebih pada kelas yang sama mempunyai
+         daftar nilai dan kolom sendiri-sendiri untuk tiap mapel, tidak
+         tercampur. Baris lama yang belum mempunyai cap mapel (data
+         sebelum fitur ini, termasuk semua data guru bermapel tunggal)
+         dibaca sebagai milik mapel PERTAMA guru itu — tidak ada baris
+         yang diubah, dipindah, atau dihapus. */
+      function mapelEfektifGuru(u, minta){
+        var usr = DB.users.find(function(x){ return x.username === u; });
+        var t = null;
+        if(usr) t = DB.teachers.find(function(x){ return (usr.nip && x.nip === usr.nip) || jrNamaKunci(x.name) === jrNamaKunci(usr.name); }) || null;
+        if(!t && u === me) t = guruSaya();
+        var daftar = t ? daftarMapelGuru(t) : [];
+        if(minta && daftar.indexOf(minta) >= 0) return minta;
+        return daftar.length ? daftar[0] : "";
+      }
+      function mapelBaris(x, u){ return x.mapel || mapelEfektifGuru(u, ""); }
       if(action === "jr_kolom_get"){
         var u4 = targetUser();
-        var cfg = DB.jrKolom.find(function(x){ return x.username === u4 && x.kelas === p.kelas; }) || null;
-        if(!cfg) cfg = {username:u4, kelas:p.kelas, kkm:(DB.jrPengaturan && DB.jrPengaturan.kkm_default) || 75, jml_uh:2, jml_tugas:1, khusus:[]};
+        var aktif4 = mapelEfektifGuru(u4, p.mapel);
+        var cfg = DB.jrKolom.find(function(x){ return x.username === u4 && x.kelas === p.kelas && mapelBaris(x, u4) === aktif4; }) || null;
+        if(!cfg) cfg = {username:u4, kelas:p.kelas, mapel:aktif4, kkm:(DB.jrPengaturan && DB.jrPengaturan.kkm_default) || 75, jml_uh:2, jml_tugas:1, khusus:[]};
         return {ok:true, kolom: cfg};
       }
       if(action === "jr_kolom_save"){
         var kk = Object.assign({}, p.kolom || {});
-        kk.username = me; kk.kelas = p.kelas;
+        kk.username = me; kk.kelas = p.kelas; kk.mapel = mapelEfektifGuru(me, p.mapel);
         kk.jml_uh = Math.min(10, Math.max(1, parseInt(kk.jml_uh, 10) || 1));
         kk.jml_tugas = Math.min(10, Math.max(1, parseInt(kk.jml_tugas, 10) || 1));
         kk.kkm = Math.min(100, Math.max(0, parseInt(kk.kkm, 10) || 75));
         kk.khusus = jrArr(kk.khusus).map(function(x){ return String(x).trim(); }).filter(Boolean);
-        var ix3 = DB.jrKolom.findIndex(function(x){ return x.username === me && x.kelas === p.kelas; });
+        var ix3 = DB.jrKolom.findIndex(function(x){ return x.username === me && x.kelas === p.kelas && mapelBaris(x, me) === kk.mapel; });
         if(ix3 >= 0) DB.jrKolom[ix3] = kk; else DB.jrKolom.push(kk);
         save(); return {ok:true, kolom: kk};
       }
       if(action === "jr_nilai_get"){
         var u5 = targetUser();
-        var rowsN = DB.jrNilai.filter(function(x){ return x.username === u5 && x.kelas === p.kelas; });
-        var cfgN = DB.jrKolom.find(function(x){ return x.username === u5 && x.kelas === p.kelas; }) || null;
-        if(!cfgN) cfgN = {username:u5, kelas:p.kelas, kkm:(DB.jrPengaturan && DB.jrPengaturan.kkm_default) || 75, jml_uh:2, jml_tugas:1, khusus:[]};
+        var aktif5 = mapelEfektifGuru(u5, p.mapel);
+        var rowsN = DB.jrNilai.filter(function(x){ return x.username === u5 && x.kelas === p.kelas && mapelBaris(x, u5) === aktif5; });
+        var cfgN = DB.jrKolom.find(function(x){ return x.username === u5 && x.kelas === p.kelas && mapelBaris(x, u5) === aktif5; }) || null;
+        if(!cfgN) cfgN = {username:u5, kelas:p.kelas, mapel:aktif5, kkm:(DB.jrPengaturan && DB.jrPengaturan.kkm_default) || 75, jml_uh:2, jml_tugas:1, khusus:[]};
         return {ok:true, nilai: rowsN, kolom: cfgN};
       }
       if(action === "jr_nilai_save"){
+        var aktifS = mapelEfektifGuru(me, p.mapel);
         var masuk = jrArr(p.nilai);
         masuk.forEach(function(en){
-          var ix4 = DB.jrNilai.findIndex(function(x){ return x.username === me && x.kelas === p.kelas && x.nis === en.nis && x.kolom === en.kolom; });
+          var ix4 = DB.jrNilai.findIndex(function(x){ return x.username === me && x.kelas === p.kelas && x.nis === en.nis && x.kolom === en.kolom && mapelBaris(x, me) === aktifS; });
           if(en.nilai === "" || en.nilai === null || en.nilai === undefined){ if(ix4 >= 0) DB.jrNilai.splice(ix4, 1); }
-          else if(ix4 >= 0) DB.jrNilai[ix4].nilai = en.nilai;
-          else DB.jrNilai.push({username:me, kelas:p.kelas, nis:String(en.nis), kolom:String(en.kolom), nilai:en.nilai});
+          else if(ix4 >= 0){ DB.jrNilai[ix4].nilai = en.nilai; if(!DB.jrNilai[ix4].mapel) DB.jrNilai[ix4].mapel = aktifS; }
+          else DB.jrNilai.push({username:me, kelas:p.kelas, mapel:aktifS, nis:String(en.nis), kolom:String(en.kolom), nilai:en.nilai});
         });
         save(); return {ok:true};
       }
@@ -5245,9 +5424,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         document.getElementById("jrDocPrint").onclick = function(){
           var w = null;
           try { w = window.open("", "_blank"); } catch(e){}
-          if(!w){ toast("Jendela cetak terhalang peramban. Gunakan format HTML, lalu cetak dari berkas itu."); return; }
-          w.document.write(docHtml + "<script>window.onload=function(){setTimeout(function(){window.print();},350);};<\/script>");
+          if(!w){ toast("Jendela baru terhalang peramban. Gunakan format HTML, lalu cetak dari berkas itu."); return; }
+          /* Dokumen mandiri dibuka apa adanya (tata letaknya sudah ramah
+             cetak A4 landskap) — pengguna mencetak dari jendela itu
+             dengan Ctrl+P / menu cetak peramban. Halaman aplikasi
+             sendiri tidak memanggil cetak langsung. */
+          w.document.write(docHtml);
           w.document.close();
+          toast("Dokumen dibuka di jendela baru — tekan Ctrl+P untuk mencetak atau menyimpan sebagai PDF.");
         };
       });
     }
@@ -5285,15 +5469,17 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     function viewJrJurnal(c){
       c.innerHTML = pageHead("Jurnal Mengajar", "Catatan mengajar " + jrMapelSaya() + " — hanya jurnal milik Anda yang tampil dan dapat diubah.",
           '<button class="btn" id="jrJAdd">+ Tulis Jurnal</button>')
+        + jrPilihMapelHtml()
         + '<div class="card"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
         + '<div class="field" style="margin:0"><label for="jrJBulan">Bulan</label><input type="month" id="jrJBulan" value="' + esc(jrJState.bulan) + '" /></div>'
         + '<button class="btn ghost" id="jrJMuat">Muat</button></div></div>'
         + '<div id="jrJList"><div class="card"><div class="empty">Memuat jurnal…</div></div></div>';
+      ikatJrPilihMapel("jr-jurnal");
       document.getElementById("jrJAdd").onclick = function(){ formJrJurnal(null); };
       document.getElementById("jrJMuat").onclick = function(){ jrJState.bulan = document.getElementById("jrJBulan").value || jrBulanIni(); viewJrJurnal(c); };
       jrCall("jr_jurnal_list", {bulan: jrJState.bulan}).then(function(r){
         var el = document.getElementById("jrJList"); if(!el) return;
-        var list = jrArr(r.jurnal);
+        var list = jrSaringMapel(jrArr(r.jurnal));
         if(!list.length){ el.innerHTML = emptyState("Belum ada jurnal pada " + jrFmtBulan(jrJState.bulan) + ". Klik \"+ Tulis Jurnal\" untuk membuat catatan pertama."); return; }
         el.innerHTML = '<p class="jr-jurnal-info">Menampilkan <b>' + list.length + ' jurnal</b> pada ' + esc(jrFmtBulan(jrJState.bulan)) + '.</p>'
           + '<div class="table-wrap jr-jurnal-wrap"><table class="jr-jurnal-table"><thead><tr>'
@@ -5339,8 +5525,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       var jamHtml = '<div class="kelas-pick">' + [1,2,3,4,5,6,7,8,9,10].map(function(n){
         return '<label class="kelas-opt"><input type="checkbox" data-jamke value="' + n + '"' + (jamSel.indexOf(String(n)) >= 0 ? " checked" : "") + " /><span>Jam ke-" + n + "</span></label>";
       }).join("") + "</div>";
+      var daftarFj = jrDaftarMapelSaya();
+      var mapelFj = (j.mapel && daftarFj.indexOf(j.mapel) >= 0) ? j.mapel : jrMapelSaya();
       openModal("<h3>" + (isEdit ? "Ubah Jurnal Mengajar" : "Tulis Jurnal Mengajar") + "</h3>"
-        + '<div class="sub">Mata pelajaran terkunci: <b>' + esc(jrMapelSaya()) + "</b> · Guru: " + esc(jrNamaSaya()) + "</div>"
+        + (daftarFj.length > 1
+            ? '<div class="field"><label for="fjMapel">Mata Pelajaran</label><select id="fjMapel">'
+              + daftarFj.map(function(m){ return '<option value="' + esc(m) + '"' + (mapelFj === m ? " selected" : "") + ">" + esc(m) + "</option>"; }).join("")
+              + "</select></div>"
+            : '<div class="sub">Mata pelajaran terkunci: <b>' + esc(jrMapelSaya()) + "</b> · Guru: " + esc(jrNamaSaya()) + "</div>")
         + '<div class="grid2"><div class="field"><label for="fjTgl">Tanggal</label><input type="date" id="fjTgl" value="' + esc(j.tanggal) + '" /></div>'
         + '<div class="field"><label for="fjKelas">Kelas</label><select id="fjKelas">' + kelasOptions(j.kelas) + "</select></div></div>"
         + '<div class="field"><label>Jam ke- (boleh lebih dari satu)</label>' + jamHtml + "</div>"
@@ -5384,7 +5576,9 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         if(!materi){ toast("Materi/topik wajib diisi."); return; }
         var jam = Array.prototype.map.call(document.querySelectorAll("[data-jamke]:checked"), function(x){ return x.value; })
           .sort(function(a, b){ return parseInt(a, 10) - parseInt(b, 10); }).join(", ");
+        var fjMapelEl = document.getElementById("fjMapel");
         var data = {id: isEdit ? j.id : "", tanggal: tanggal, kelas: kelas, jam_ke: jam, materi: materi,
+          mapel: fjMapelEl ? fjMapelEl.value : jrMapelSaya(),
           kegiatan: document.getElementById("fjKegiatan").value.trim(), catatan: document.getElementById("fjCatatan").value.trim(), tidak_hadir: thSel};
         jrCall("jr_jurnal_save", {jurnal: data}).then(function(){ closeModal(); toast("Jurnal tersimpan."); jrJState.bulan = String(tanggal).slice(0, 7); gotoView("jr-jurnal"); })
           .catch(function(e){ toast(e.message); });
@@ -5395,6 +5589,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var jrPState = {tanggal: jrHariIni(), kelas: "9A", rincian: {}, pending: {}, tersimpan: false, dariJurnal: false};
     function viewJrPresensi(c){
       c.innerHTML = pageHead("Presensi Siswa", "Kehadiran siswa " + jrMapelSaya() + " per tanggal & kelas. Status: H = Hadir, S = Sakit, I = Izin, A = Alpa.")
+        + jrPilihMapelHtml()
         + '<div class="card"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
         + '<div class="field" style="margin:0"><label for="jpTgl">Tanggal</label><input type="date" id="jpTgl" value="' + esc(jrPState.tanggal) + '" /></div>'
         + '<div class="field" style="margin:0"><label for="jpKelas">Kelas</label><select id="jpKelas">' + kelasOptions(jrPState.kelas) + "</select></div>"
@@ -5403,6 +5598,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         + '<div class="card"><h3>Rekap Bulanan</h3><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
         + '<div class="field" style="margin:0"><label for="jpBulan">Bulan</label><input type="month" id="jpBulan" value="' + esc(jrBulanIni()) + '" /></div>'
         + '<button class="btn ghost" id="jpRekapBtn">Tampilkan Rekap</button></div><div id="jpRekap" style="margin-top:12px"></div></div>';
+      ikatJrPilihMapel("jr-presensi");
       document.getElementById("jpMuat").onclick = function(){
         jrPState.tanggal = document.getElementById("jpTgl").value || jrHariIni();
         jrPState.kelas = document.getElementById("jpKelas").value;
@@ -5489,7 +5685,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var box = document.getElementById("jpRekap");
         box.innerHTML = '<div class="empty">Memuat rekap…</div>';
         jrCall("jr_presensi_rekap", {bulan: bulan, kelas: jrPState.kelas}).then(function(r){
-          var ringkas = jrArr(r.ringkas);
+          var ringkas = jrArr(r.ringkas).slice().sort(function(a, b){ return String(a.nama).localeCompare(String(b.nama), "id"); });
           var sesi = jrArr(r.sesi);
           if(!sesi.length){ box.innerHTML = '<div class="empty">Belum ada sesi presensi kelas ' + esc(jrPState.kelas) + " pada " + esc(jrFmtBulan(bulan)) + ".</div>"; return; }
           var headers = ["No", "Nama Siswa", "Hadir", "Sakit", "Izin", "Alpa", "% Hadir"];
@@ -5507,6 +5703,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var jrNState = {kelas: "9A", kolom: null, map: {}};
     function viewJrNilai(c){
       c.innerHTML = pageHead("Daftar Nilai — " + jrMapelSaya(), "Nilai per kelas untuk mapel Anda. Kolom dan KKM tersimpan per kelas; nilai valid 0–100.")
+        + jrPilihMapelHtml()
         + '<div class="card"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
         + '<div class="field" style="margin:0"><label for="jnKelas">Kelas</label><select id="jnKelas">' + kelasOptions(jrNState.kelas) + "</select></div>"
         + '<button class="btn" id="jnMuat">Muat Daftar Nilai</button>'
@@ -5514,6 +5711,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         + '<button class="btn ghost" id="jnEksporBtn">Ekspor CSV/Excel</button></div>'
         + '<div id="jnKolomBox" style="margin-top:14px"></div></div>'
         + '<div id="jnBody"><div class="card"><div class="empty">Pilih kelas, lalu klik Muat Daftar Nilai.</div></div></div>';
+      ikatJrPilihMapel("jr-nilai");
       document.getElementById("jnMuat").onclick = function(){ jrNState.kelas = document.getElementById("jnKelas").value; muatNilai(); };
       document.getElementById("jnEksporBtn").onclick = function(){ eksporNilai(); };
       var impFile = document.getElementById("jnImporFile");
@@ -5523,7 +5721,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       function muatNilai(){
         var body = document.getElementById("jnBody");
         body.innerHTML = '<div class="card"><div class="empty">Memuat nilai…</div></div>';
-        jrCall("jr_nilai_get", {kelas: jrNState.kelas}).then(function(r){
+        jrCall("jr_nilai_get", {kelas: jrNState.kelas, mapel: jrMapelSaya()}).then(function(r){
           jrNState.kolom = r.kolom || kolomSaatIni();
           jrNState.map = jrNilaiMap(r.nilai);
           renderKolomBox(); renderNilaiTabel();
@@ -5565,7 +5763,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           if(isNaN(cfg4.kkm) || cfg4.kkm < 0 || cfg4.kkm > 100){ toast("KKM harus berupa angka 0–100."); return; }
           if(isNaN(cfg4.jml_uh) || cfg4.jml_uh < 1 || cfg4.jml_uh > 10){ toast("Jumlah kolom UH harus 1–10."); return; }
           if(isNaN(cfg4.jml_tugas) || cfg4.jml_tugas < 1 || cfg4.jml_tugas > 10){ toast("Jumlah kolom Tugas harus 1–10."); return; }
-          jrCall("jr_kolom_save", {kelas: jrNState.kelas, kolom: cfg4}).then(function(r){
+          jrCall("jr_kolom_save", {kelas: jrNState.kelas, mapel: jrMapelSaya(), kolom: cfg4}).then(function(r){
             jrNState.kolom = r.kolom || cfg4; renderKolomBox(); renderNilaiTabel(); toast("Pengaturan kolom kelas " + jrNState.kelas + " tersimpan.");
           }).catch(function(e){ toast(e.message); });
         };
@@ -5606,7 +5804,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             entries.push({nis: inp.getAttribute("data-jn-nis"), kolom: inp.getAttribute("data-jn-kolom"), nilai: v === "" ? "" : parseFloat(v)});
           });
           if(salah.length){ toast("Ada nilai di luar rentang 0–100 pada kolom: " + salah.join(", ") + ". Perbaiki dulu sebelum menyimpan."); return; }
-          jrCall("jr_nilai_save", {kelas: jrNState.kelas, nilai: entries}).then(function(){ toast("Nilai kelas " + jrNState.kelas + " tersimpan."); })
+          jrCall("jr_nilai_save", {kelas: jrNState.kelas, mapel: jrMapelSaya(), nilai: entries}).then(function(){ toast("Nilai " + jrMapelSaya() + " kelas " + jrNState.kelas + " tersimpan."); })
             .catch(function(e){ toast(e.message); });
         };
       }
@@ -5688,6 +5886,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     var jrCState = {jenis: "jurnal", kelas: "9A", bulan: jrBulanIni()};
     function viewJrCetak(c){
       c.innerHTML = pageHead("Cetak & Rekap", "Dokumen jurnal, presensi, dan nilai berkop resmi sekolah — kertas A4 landskap, lengkap dengan kolom tanda tangan guru.")
+        + jrPilihMapelHtml()
         + '<div class="card no-print"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">'
         + '<div class="field" style="margin:0"><label for="jcJenis">Jenis Dokumen</label><select id="jcJenis">'
         + '<option value="jurnal"' + (jrCState.jenis === "jurnal" ? " selected" : "") + ">Jurnal Mengajar</option>"
@@ -5697,6 +5896,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         + '<div class="field" style="margin:0"><label for="jcBulan">Bulan (Jurnal & Presensi)</label><input type="month" id="jcBulan" value="' + esc(jrCState.bulan) + '" /></div>'
         + '<button class="btn" id="jcTampil">Tampilkan Dokumen</button></div></div>'
         + '<div id="jcBody"><div class="card"><div class="empty">Pilih jenis dokumen, kelas, dan bulan, lalu klik Tampilkan Dokumen.</div></div></div>';
+      ikatJrPilihMapel("jr-cetak");
       document.getElementById("jcTampil").onclick = function(){
         jrCState.jenis = document.getElementById("jcJenis").value;
         jrCState.kelas = document.getElementById("jcKelas").value;
@@ -5709,7 +5909,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var guru = jrNamaSaya(), mapel = jrMapelSaya();
         if(jrCState.jenis === "jurnal"){
           jrCall("jr_jurnal_list", {bulan: jrCState.bulan}).then(function(r){
-            var list = jrArr(r.jurnal).filter(function(j){ return j.kelas === jrCState.kelas; })
+            var list = jrSaringMapel(jrArr(r.jurnal)).filter(function(j){ return j.kelas === jrCState.kelas; })
               .sort(function(a, b){ return String(a.tanggal) < String(b.tanggal) ? -1 : 1; });
             var headers = ["No", "Tanggal", "Kelas", "Jam Ke-", "Materi", "Kegiatan", "Hadir", "Tidak Hadir", "Nama Tidak Hadir", "Catatan"];
             var rows = list.map(function(j, i){ return [i + 1, jrFmtTgl(j.tanggal), j.kelas || "-", kelasList(j.jam_ke).join(", ") || "-", j.materi || "-", j.kegiatan || "-", j.jml_hadir != null ? j.jml_hadir : "-", j.jml_tidak_hadir != null ? j.jml_tidak_hadir : jrArr(j.tidak_hadir).length, jrArr(j.tidak_hadir).join(", ") || "-", j.catatan || "-"]; });
@@ -5720,7 +5920,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           }).catch(function(e){ body.innerHTML = '<div class="card"><div class="empty">Gagal menyusun dokumen: ' + esc(e.message) + "</div></div>"; });
         } else if(jrCState.jenis === "presensi"){
           jrCall("jr_presensi_rekap", {bulan: jrCState.bulan, kelas: jrCState.kelas}).then(function(r){
-            var ringkas = jrArr(r.ringkas); var sesi = jrArr(r.sesi);
+            var ringkas = jrArr(r.ringkas).slice().sort(function(a, b){ return String(a.nama).localeCompare(String(b.nama), "id"); }); var sesi = jrArr(r.sesi);
             var headers = ["No", "Nama Siswa", "Hadir", "Sakit", "Izin", "Alpa", "% Hadir"];
             var rows = ringkas.map(function(x, i){ var total = (x.H || 0) + (x.S || 0) + (x.I || 0) + (x.A || 0); return [i + 1, x.nama, x.H || 0, x.S || 0, x.I || 0, x.A || 0, (total ? Math.round((x.H || 0) / total * 100) : 0) + "%"]; });
             var judul = "REKAP PRESENSI SISWA — " + mapel.toUpperCase();
@@ -5729,7 +5929,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             document.getElementById("jcUnduh").onclick = function(){ jrUnduhDokumen(judul + " — Kelas " + jrCState.kelas, "rekap-presensi-" + jrCState.kelas.toLowerCase() + "-" + jrCState.bulan, isi, headers, rows); };
           }).catch(function(e){ body.innerHTML = '<div class="card"><div class="empty">Gagal menyusun dokumen: ' + esc(e.message) + "</div></div>"; });
         } else {
-          jrCall("jr_nilai_get", {kelas: jrCState.kelas}).then(function(r){
+          jrCall("jr_nilai_get", {kelas: jrCState.kelas, mapel: mapel}).then(function(r){
             var cfg = r.kolom || {kkm:75, jml_uh:2, jml_tugas:1, khusus:[]};
             var cols = jrKolomNama(cfg); var map = jrNilaiMap(r.nilai);
             var roster = jrRoster(jrCState.kelas);
@@ -5772,7 +5972,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       jrCall("jr_monitoring", {bulan: jrMState.bulan}).then(function(r){
         var body = document.getElementById("jmBody"); if(!body) return;
         var rows = jrArr(r.rows);
-        if(jrMState.mapel !== "Semua") rows = rows.filter(function(x){ return x.mapel === jrMState.mapel; });
+        if(jrMState.mapel !== "Semua") rows = rows.filter(function(x){ return parseMapelList(x.mapel).indexOf(jrMState.mapel) >= 0; });
         if(jrMState.cari) rows = rows.filter(function(x){ return jrNamaKunci(x.nama).indexOf(jrNamaKunci(jrMState.cari)) >= 0; });
         rowsCache = rows;
         var aktif = rows.filter(function(x){ return x.jml_jurnal > 0 && x.jml_presensi > 0; }).length;
