@@ -293,6 +293,20 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         .jr-doc-jurnal-table{font-size:.78rem}
         .jr-doc-jurnal-table thead{display:table-header-group}
       }
+    
+      /* ===== Menu geser kiri di HP (ditambahkan 2026-11-02) ===== */
+      #lmsBurger{display:none}
+      #lmsDrawerBg{display:none}
+      @media (max-width:820px){
+        #lmsBurger{display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.12);color:#fff;border-radius:10px;font-size:21px;line-height:1;cursor:pointer;flex:none}
+        .sidebar{position:fixed;top:0;left:0;bottom:0;width:272px;max-width:84vw;height:100dvh;z-index:90;background:var(--surface);box-shadow:0 0 44px rgba(2,12,27,.4);padding:18px 14px;overflow-y:auto;transform:translateX(-106%);transition:transform .26s ease}
+        body.lms-nav-open .sidebar{transform:translateX(0)}
+        .sidebar .navwrap{display:block}
+        .sidebar .nav-item{width:100%;padding:11px 13px;margin:0 0 4px}
+        #lmsDrawerBg{display:block;position:fixed;inset:0;background:rgba(4,12,24,.5);z-index:80;opacity:0;pointer-events:none;transition:opacity .26s ease}
+        body.lms-nav-open #lmsDrawerBg{opacity:1;pointer-events:auto}
+        body.lms-nav-open{overflow:hidden}
+      }
     </style>
   </head>
   <body>
@@ -366,6 +380,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
     <!-- ================= APP ================= -->
     <div id="appView" class="app hidden">
       <div class="topbar">
+        <button id="lmsBurger" type="button" aria-label="Buka menu navigasi">☰</button>
         <div class="tlogo" id="topLogo"></div>
         <div class="ttitle">
           <b>SMP NEGERI 1 WONOSARI</b>
@@ -388,6 +403,20 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       </div>
     </div>
 
+    <div id="lmsDrawerBg"></div>
+    <script>
+    (function(){
+      var b=document.getElementById("lmsBurger"),bg=document.getElementById("lmsDrawerBg");
+      if(!b)return;
+      function tutup(){document.body.classList.remove("lms-nav-open")}
+      b.addEventListener("click",function(){document.body.classList.toggle("lms-nav-open")});
+      if(bg)bg.addEventListener("click",tutup);
+      var nav=document.getElementById("sideNav");
+      if(nav)nav.addEventListener("click",function(e){var t=e.target;if(t&&t.closest&&t.closest(".nav-item"))tutup()});
+      document.addEventListener("keydown",function(e){if(e.key==="Escape")tutup()});
+      window.addEventListener("resize",function(){if(window.innerWidth>820)tutup()});
+    })();
+    </script>
     <div id="modalRoot"></div>
     <div id="toast"></div>
 
@@ -1159,10 +1188,22 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       });
       return h + '</div>';
     }
-    function mapelPickerValue(prefix, tambahan){
+    /* Hasil pemilih mapel. urutanLama (daftar mapel guru SEBELUM diubah,
+       dari formulir Ubah) menentukan urutan: mapel yang sudah diampu
+       mempertahankan urutan asalnya — mapel pertama guru tetap pertama —
+       dan mapel yang baru dicentang/ditulis menyusul sesudahnya. Tanpa
+       ini, urutan hasil mengikuti urutan daftar mapel umum sehingga
+       menambah satu mapel bisa membalik mapel pertama guru. */
+    function mapelPickerValue(prefix, tambahan, urutanLama){
       var vals = [];
       Array.prototype.forEach.call(document.querySelectorAll('input[data-mpick="'+prefix+'"]:checked'), function(cb){ if(vals.indexOf(cb.value) < 0) vals.push(cb.value); });
       parseMapelList(tambahan).forEach(function(m){ if(vals.indexOf(m) < 0) vals.push(m); });
+      var lama = parseMapelList(urutanLama);
+      if(lama.length){
+        var terurut = lama.filter(function(m){ return vals.indexOf(m) >= 0; });
+        vals.forEach(function(m){ if(terurut.indexOf(m) < 0) terurut.push(m); });
+        vals = terurut;
+      }
       return vals;
     }
 
@@ -3222,7 +3263,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       document.getElementById("fgSave").onclick = function(){
         var nip = document.getElementById("fgNip").value.trim();
         var nama = document.getElementById("fgNama").value.trim();
-        var daftarMapel = mapelPickerValue("fg", document.getElementById("fgMapelBaru").value);
+        var daftarMapel = mapelPickerValue("fg", document.getElementById("fgMapelBaru").value, isEdit ? t.subject : "");
         var mapel = daftarMapel.join(", ");
         if(!nip || !nama || !daftarMapel.length){ toast("NIP, nama, dan minimal satu mata pelajaran wajib diisi."); return; }
         var telp = document.getElementById("fgTelp").value.trim();
@@ -5076,7 +5117,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         return jrApi("jr_jurnal_delete", {id: p.id}).then(function(){ return {ok:true}; });
       }
       if(action === "jr_presensi_get"){
-        return jrApi("jr_presensi_get", {tanggal: p.tanggal, kelas: p.kelas}).then(function(r){
+        return jrApi("jr_presensi_get", {tanggal: p.tanggal, kelas: p.kelas, mapel: p.mapel || jrMapelSaya()}).then(function(r){
           if(r.data) return {ok:true, presensi: jrPetakanPresensi(r.data), dari_jurnal: null};
           /* Belum ada presensi tersimpan: susun isi awal dari jurnal
              guru ini pada tanggal & kelas yang sama (nama tidak hadir). */
@@ -5095,7 +5136,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var pr = p.presensi || {};
         var rincId = {};
         Object.keys(pr.rincian || {}).forEach(function(nisn){ rincId[jrIdDariNisn(nisn)] = pr.rincian[nisn]; });
-        return jrApi("jr_presensi_save", {tanggal: pr.tanggal, kelas: pr.kelas, rincian: rincId}).then(function(r){
+        return jrApi("jr_presensi_save", {tanggal: pr.tanggal, kelas: pr.kelas, mapel: pr.mapel || p.mapel || jrMapelSaya(), rincian: rincId}).then(function(r){
           return {ok:true, presensi: jrPetakanPresensi(r.data)};
         });
       }
@@ -5109,7 +5150,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         });
       }
       if(action === "jr_kolom_get"){
-        return Promise.all([jrApi("jr_kolom_get", {}), jrApi("jr_pengaturan_get", {})]).then(function(rs){
+        return Promise.all([jrApi("jr_kolom_get", {mapel: p.mapel || jrMapelSaya()}), jrApi("jr_pengaturan_get", {})]).then(function(rs){
           return {ok:true, kolom: Object.assign(jrCfgDariServer(rs[0].data, rs[1].kkm), {kelas: p.kelas})};
         });
       }
@@ -5118,14 +5159,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         var data = {jml_uh: cfg.jml_uh, jml_tugas: cfg.jml_tugas,
           kolom_khusus: jrArr(cfg.khusus).map(function(x){ return String(x); }),
           kolom_tampil: jrKolomNama(cfg)};
-        var janji = [jrApi("jr_kolom_save", {data: data})];
+        var janji = [jrApi("jr_kolom_save", {data: data, mapel: p.mapel || jrMapelSaya()})];
         if(cfg.kkm !== undefined && cfg.kkm !== null && cfg.kkm !== "") janji.push(jrApi("jr_pengaturan_set", {kkm: cfg.kkm}));
         return Promise.all(janji).then(function(rs){
           return {ok:true, kolom: Object.assign(jrCfgDariServer(rs[0].data || data, cfg.kkm), {kelas: p.kelas})};
         });
       }
       if(action === "jr_nilai_get"){
-        return Promise.all([jrApi("jr_nilai_get", {kelas: p.kelas, mapel: p.mapel || ""}), jrApi("jr_kolom_get", {})]).then(function(rs){
+        return Promise.all([jrApi("jr_nilai_get", {kelas: p.kelas, mapel: p.mapel || ""}), jrApi("jr_kolom_get", {mapel: p.mapel || jrMapelSaya()})]).then(function(rs){
           /* Nilai dipisah per mapel: baris yang membawa cap mapel dari
              server disaring ke mapel aktif; baris lama tanpa cap mapel
              (data sebelum fitur ini) tetap tampil apa adanya. */
@@ -5608,7 +5649,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
       function muatPresensi(){
         var body = document.getElementById("jpBody"), info = document.getElementById("jpInfo");
         body.innerHTML = '<div class="empty">Memuat daftar hadir…</div>'; info.innerHTML = "";
-        jrCall("jr_presensi_get", {tanggal: jrPState.tanggal, kelas: jrPState.kelas}).then(function(r){
+        jrCall("jr_presensi_get", {tanggal: jrPState.tanggal, kelas: jrPState.kelas, mapel: jrMapelSaya()}).then(function(r){
           var roster = jrRoster(jrPState.kelas);
           jrPState.rincian = {}; jrPState.pending = {}; jrPState.tersimpan = !!r.presensi; jrPState.dariJurnal = false;
           if(r.presensi && r.presensi.rincian){
@@ -5664,7 +5705,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
           }
           var kosong = roster.filter(function(s){ return !jrPState.rincian[s.nisn]; });
           if(kosong.length){ toast("Masih ada siswa yang statusnya kosong. Tetapkan status untuk semua siswa."); return; }
-          jrCall("jr_presensi_save", {presensi: {tanggal: jrPState.tanggal, kelas: jrPState.kelas, rincian: jrPState.rincian}}).then(function(){
+          jrCall("jr_presensi_save", {presensi: {tanggal: jrPState.tanggal, kelas: jrPState.kelas, mapel: jrMapelSaya(), rincian: jrPState.rincian}}).then(function(){
             jrPState.tersimpan = true; jrPState.pending = {};
             toast("Presensi " + jrPState.kelas + " tanggal " + jrPState.tanggal + " tersimpan.");
             muatPresensi();
@@ -5708,12 +5749,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
         + '<div class="field" style="margin:0"><label for="jnKelas">Kelas</label><select id="jnKelas">' + kelasOptions(jrNState.kelas) + "</select></div>"
         + '<button class="btn" id="jnMuat">Muat Daftar Nilai</button>'
         + '<button class="btn ghost" id="jnImporBtn">Impor CSV</button><input type="file" id="jnImporFile" accept=".csv,.xlsx,.xls" class="hidden" />'
-        + '<button class="btn ghost" id="jnEksporBtn">Ekspor CSV/Excel</button></div>'
+        + '<button class="btn ghost" id="jnEksporBtn">Ekspor CSV/Excel</button>'
+        + '<button class="btn ghost" id="jnAmbilBtn">Ambil dari Aktivitas</button></div>'
         + '<div id="jnKolomBox" style="margin-top:14px"></div></div>'
         + '<div id="jnBody"><div class="card"><div class="empty">Pilih kelas, lalu klik Muat Daftar Nilai.</div></div></div>';
       ikatJrPilihMapel("jr-nilai");
       document.getElementById("jnMuat").onclick = function(){ jrNState.kelas = document.getElementById("jnKelas").value; muatNilai(); };
       document.getElementById("jnEksporBtn").onclick = function(){ eksporNilai(); };
+      document.getElementById("jnAmbilBtn").onclick = function(){ ambilDariAktivitas(); };
       var impFile = document.getElementById("jnImporFile");
       document.getElementById("jnImporBtn").onclick = function(){ impFile.click(); };
       impFile.onchange = function(){ if(impFile.files && impFile.files[0]) imporNilaiFile(impFile.files[0]); impFile.value = ""; };
@@ -5830,6 +5873,107 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
             + '<div class="stat"><b>' + tertinggi + '</b><span>Rata-rata Tertinggi</span></div>'
             + '<div class="stat"><b>' + terendah + '</b><span>Rata-rata Terendah</span></div>'
             + '<div class="stat"><b>' + bawah + '</b><span>Siswa Di Bawah KKM ' + esc(cfg.kkm) + "</span></div></div>";
+        }
+      }
+      /* ---------- ambil nilai dari aktivitas (Kuis / Asesmen / Tugas) ----------
+         Menyalin skor aktivitas milik guru ini (mapel aktif, kelas terpilih)
+         ke satu kolom khusus pada daftar nilai, lewat jr_kolom_save +
+         jr_nilai_save yang sama dengan jalur simpan biasa. */
+      function jnAktivitasSaya(){
+        var mapel = jrMapelSaya();
+        var rosterNisn = {};
+        jrRoster(jrNState.kelas).forEach(function(s){ rosterNisn[String(s.nisn)] = true; });
+        function kumpulkan(jenis, daftar, hasil, kunci){
+          var out = [];
+          jrArr(daftar).forEach(function(a){
+            if(!milikSaya(a) || a.mapel !== mapel || !kelasMasuk(a, jrNState.kelas)) return;
+            var terbaru = {};
+            jrArr(hasil).forEach(function(r){
+              if(String(r[kunci]) !== String(a.id)) return;
+              if(!rosterNisn[String(r.nisn)]) return;
+              if(r.score === null || r.score === undefined || r.score === "" || isNaN(Number(r.score))) return;
+              var nis = String(r.nisn);
+              if(!terbaru[nis] || String(r.at || "") >= String(terbaru[nis].at || "")) terbaru[nis] = r;
+            });
+            var nilai = Object.keys(terbaru).map(function(nis){ return {nis: nis, nilai: Number(terbaru[nis].score)}; });
+            out.push({jenis: jenis, judul: (a.title && String(a.title).trim()) ? String(a.title) : "(Tanpa judul)", nilai: nilai});
+          });
+          return out;
+        }
+        return kumpulkan("Kuis", DB.kuis, DB.kuisResults, "kuisId")
+          .concat(kumpulkan("Asesmen", DB.asesmen, DB.asesmenResults, "asesmenId"))
+          .concat(kumpulkan("Tugas", DB.tugas, DB.submissions, "tugasId"));
+      }
+      function ambilDariAktivitas(){
+        if(!jrNState.kolom){ toast("Muat daftar nilainya dulu sebelum mengambil nilai dari aktivitas."); return; }
+        var daftar = jnAktivitasSaya();
+        var isi = "<h3>Ambil Nilai dari Aktivitas</h3>"
+          + '<div class="sub">Nilai dari aktivitas ' + esc(jrMapelSaya()) + " kelas " + esc(jrNState.kelas) + " akan disalin menjadi kolom khusus pada daftar nilai ini. Hasil Asesmen/Tugas yang belum dinilai guru tidak ikut terambil.</div>";
+        if(!daftar.length){
+          isi += '<div class="empty">Belum ada kuis, asesmen, atau tugas milik Anda untuk mapel dan kelas ini.</div>';
+        } else {
+          isi += daftar.map(function(a, i){
+            var tombol = a.nilai.length
+              ? '<button class="btn small" data-jn-ambil="' + i + '">Ambil</button>'
+              : '<button class="btn small" disabled>Ambil</button>';
+            return '<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;border-top:1px dashed var(--line);padding:9px 0">'
+              + "<div><b>" + esc(a.jenis) + "</b> · " + esc(a.judul) + '<br/><span style="color:var(--muted);font-size:.85rem">'
+              + (a.nilai.length ? a.nilai.length + " nilai dapat diambil" : "belum ada nilai") + "</span></div>"
+              + "<div>" + tombol + "</div></div>";
+          }).join("");
+        }
+        isi += '<div class="foot"><button class="btn ghost" onclick="closeModal()">Tutup</button></div>';
+        openModal(isi);
+        Array.prototype.forEach.call(document.querySelectorAll("[data-jn-ambil]"), function(b){
+          b.onclick = function(){ jnAmbilSatu(daftar[Number(b.getAttribute("data-jn-ambil"))]); };
+        });
+      }
+      function jnAmbilSatu(a){
+        if(!a || !a.nilai.length) return;
+        var cfg = kolomSaatIni();
+        var nama = (a.judul === "(Tanpa judul)" ? (a.jenis + " tanpa judul") : a.judul).trim().slice(0, 60).trim();
+        if(!nama) nama = a.jenis;
+        var kolomLama = jrArr(cfg.khusus).indexOf(nama) >= 0;
+        if(!kolomLama && jrKolomNama(cfg).indexOf(nama) >= 0){
+          nama = a.jenis + ": " + nama;
+          kolomLama = jrArr(cfg.khusus).indexOf(nama) >= 0;
+          if(!kolomLama && jrKolomNama(cfg).indexOf(nama) >= 0){ toast('Nama kolom "' + nama + '" bertabrakan dengan kolom yang sudah ada.'); return; }
+        }
+        var entries = a.nilai.map(function(x){ return {nis: x.nis, kolom: nama, nilai: x.nilai}; });
+        function gagal(e){
+          renderKolomBox(); renderNilaiTabel();
+          if(!kolomLama && jrNState.kolom && jrArr(jrNState.kolom.khusus).indexOf(nama) >= 0){
+            toast('Kolom "' + nama + '" sudah terbuat, tetapi nilainya gagal disimpan (' + e.message + "). Buka lagi Ambil dari Aktivitas untuk mencoba lagi.");
+          } else {
+            toast("Gagal mengambil nilai: " + e.message);
+          }
+        }
+        function simpanNilai(){
+          var sebelum = {};
+          entries.forEach(function(en){
+            var k = en.nis + "|" + nama;
+            sebelum[k] = jrNState.map[k];
+            jrNState.map[k] = en.nilai;
+          });
+          return jrCall("jr_nilai_save", {kelas: jrNState.kelas, mapel: jrMapelSaya(), nilai: entries}).then(function(){
+            closeModal(); renderKolomBox(); renderNilaiTabel();
+            toast(entries.length + " nilai dari " + a.jenis + ' "' + a.judul + '" ' + (kolomLama ? "memperbarui" : "masuk ke") + ' kolom "' + nama + '".');
+          }, function(e){
+            entries.forEach(function(en){
+              var k = en.nis + "|" + nama;
+              if(sebelum[k] === undefined) delete jrNState.map[k]; else jrNState.map[k] = sebelum[k];
+            });
+            throw e;
+          });
+        }
+        if(kolomLama){
+          simpanNilai().catch(gagal);
+        } else {
+          var cfgBaru = Object.assign({}, cfg, {khusus: jrArr(cfg.khusus).concat([nama])});
+          jrCall("jr_kolom_save", {kelas: jrNState.kelas, mapel: jrMapelSaya(), kolom: cfgBaru}).then(function(r){
+            jrNState.kolom = r.kolom || cfgBaru;
+            return simpanNilai();
+          }).catch(gagal);
         }
       }
       function eksporNilai(){
